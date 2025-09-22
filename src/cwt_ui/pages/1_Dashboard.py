@@ -55,10 +55,9 @@ def render(ec2_df: pd.DataFrame, s3_df: pd.DataFrame, cards, tables, formatters)
     - EC2 table (Top by monthly cost)
     - S3 Summary table
     """
-    import streamlit as st
-
     # KPIs
     idle_count, monthly_waste, cold_gb = _compute_summary(ec2_df, s3_df)
+    import streamlit as st
     c1, c2, c3 = st.columns(3)
     with c1:
         cards.metric("Idle EC2 (est.)", str(idle_count), "instances needing action")
@@ -67,11 +66,8 @@ def render(ec2_df: pd.DataFrame, s3_df: pd.DataFrame, cards, tables, formatters)
     with c3:
         cards.metric("S3 Cold GB", f"{cold_gb:,.2f}")
 
-    # --- Colored subheaders ---
-    st.markdown("<h3 style='margin-top:1rem;color:#4FC3F7'>EC2 – Top by Monthly Cost</h3>",
-                unsafe_allow_html=True)
-
     # EC2
+    st.subheader("EC2 – Top by Monthly Cost")
     ec2_tbl = _prepare_ec2_table(ec2_df)
     if ec2_tbl.empty:
         st.info("No EC2 data.")
@@ -90,10 +86,8 @@ def render(ec2_df: pd.DataFrame, s3_df: pd.DataFrame, cards, tables, formatters)
 
     st.divider()
 
-    st.markdown("<h3 style='margin-top:0.5rem;color:#FF7043'>S3 Buckets Summary</h3>",
-                unsafe_allow_html=True)
-
     # S3
+    st.subheader("S3 Buckets Summary")
     s3_tbl = _prepare_s3_table(s3_df)
     if s3_tbl.empty:
         st.info("No S3 data.")

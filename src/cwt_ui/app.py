@@ -213,9 +213,4 @@ else:
 
 
 
-import boto3, streamlit as st
-try:
-    ident = boto3.client("sts").get_caller_identity()
-    st.write("AWS Identity:", ident)
-except Exception as e:
-    st.error(f"Auth failed: {e}")
+

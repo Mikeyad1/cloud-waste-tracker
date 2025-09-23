@@ -1,19 +1,16 @@
-# cwt_ui/services/scans.py
+# src/cwt_ui/services/scans.py
 from __future__ import annotations
-
-from pathlib import Path
-from typing import Tuple, Optional, Callable, Any
-
+from typing import Tuple, Optional, Any, Iterable
 import pandas as pd
 
-# Try to import your core scanners from the app package
+# Import scanners from the new location: src/scanners
 try:
-    from cloud_waste_tracker.scanners import ec2_scanner as _ec2_scanner
+    from scanners import ec2_scanner as _ec2_scanner  # type: ignore
 except Exception:
     _ec2_scanner = None  # type: ignore
 
 try:
-    from cloud_waste_tracker.scanners import s3_scanner as _s3_scanner
+    from scanners import s3_scanner as _s3_scanner  # type: ignore
 except Exception:
     _s3_scanner = None  # type: ignore
 
@@ -22,127 +19,99 @@ except Exception:
 # Public API (used by app.py)
 # ------------------------------
 
-def scan_ec2() -> pd.DataFrame:
+def run_all_scans(region: Optional[str] = None) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Run both scans and return normalized (ec2_df, s3_df)."""
+    return scan_ec2(region=region), scan_s3(region=region)
+
+
+def scan_ec2(region: Optional[str] = None) -> pd.DataFrame:
     """
-    Run the EC2 scan using your core scanner if available.
-    Expected columns (flexible, but recommended):
-      - instance_id, name, instance_type, region
-      - avg_cpu_7d (float)
-      - monthly_cost_usd (float)
-      - recommendation (e.g., "OK", "Stop or downsize")
-      - type (e.g., "idle_instance")
+    Run the EC2 scan and return a normalized DataFrame for the UI.
+    Recommended columns: instance_id, name, instance_type, region,
+    avg_cpu_7d, monthly_cost_usd, recommendation, type
     """
     if _ec2_scanner is None:
-        raise RuntimeError("cloud_waste_tracker.scanners.ec2_scanner is not importable.")
-    if not hasattr(_ec2_scanner, "scan_ec2"):
-        raise RuntimeError("ec2_scanner.scan_ec2() not found.")
-    df: pd.DataFrame = _ec2_scanner.scan_ec2()  # type: ignore[attr-defined]
+        return _empty_ec2_frame()
+
+    # Try several common entry points for backward compatibility
+    data = _call_scanner(
+        _ec2_scanner,
+        preferred=["scan_ec2", "run", "run_ec2", "main"],
+        kwargs={"region": region} if region else {},
+    )
+    df = _to_dataframe(data)
     return _normalize_ec2(df)
 
 
-def scan_s3() -> pd.DataFrame:
+def scan_s3(region: Optional[str] = None) -> pd.DataFrame:
     """
-    Run the S3 scan using your core scanner if available.
-    Expected columns (flexible, but recommended):
-      - bucket, region
-      - size_total_gb (float), objects_total (int)
-      - standard_cold_gb (float), standard_cold_objects (int)
-      - lifecycle_defined (bool)
-      - recommendation (e.g., "OK", "Move old logs to Glacier")
-      - notes (str)
-      - type (e.g., "s3_bucket_summary")
+    Run the S3 scan and return a normalized DataFrame for the UI.
+    Recommended columns: bucket, region, size_total_gb, objects_total,
+    standard_cold_gb, standard_cold_objects, lifecycle_defined,
+    recommendation, notes, type
     """
     if _s3_scanner is None:
-        raise RuntimeError("cloud_waste_tracker.scanners.s3_scanner is not importable.")
-    if not hasattr(_s3_scanner, "scan_s3"):
-        raise RuntimeError("s3_scanner.scan_s3() not found.")
-    df: pd.DataFrame = _s3_scanner.scan_s3()  # type: ignore[attr-defined]
+        return _empty_s3_frame()
+
+    data = _call_scanner(
+        _s3_scanner,
+        preferred=["scan_s3", "run", "run_s3", "main"],
+        kwargs={"region": region} if region else {},
+    )
+    df = _to_dataframe(data)
     return _normalize_s3(df)
-
-
-def scan_all() -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Convenience wrapper that returns (ec2_df, s3_df).
-    """
-    return scan_ec2(), scan_s3()
-
-
-def load_from_csv(ec2_csv: Path, s3_csv: Path) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Load EC2/S3 results from CSV files (if they exist).
-    Missing files return empty DataFrames.
-    The data is normalized to the expected schema.
-    """
-    ec2_df = _read_csv_safe(ec2_csv)
-    s3_df = _read_csv_safe(s3_csv)
-    return _normalize_ec2(ec2_df), _normalize_s3(s3_df)
-
-
-# ------------------------------
-# Optional helpers (export)
-# ------------------------------
-
-def save_to_csv(
-    ec2_df: Optional[pd.DataFrame],
-    s3_df: Optional[pd.DataFrame],
-    ec2_csv: Path,
-    s3_csv: Path,
-) -> None:
-    """
-    Save EC2/S3 DataFrames to CSV (if provided).
-    """
-    if isinstance(ec2_df, pd.DataFrame) and not ec2_df.empty:
-        _ensure_parent(ec2_csv)
-        ec2_df.to_csv(ec2_csv, index=False)
-    if isinstance(s3_df, pd.DataFrame) and not s3_df.empty:
-        _ensure_parent(s3_csv)
-        s3_df.to_csv(s3_csv, index=False)
 
 
 # ------------------------------
 # Internal utilities
 # ------------------------------
 
-def _read_csv_safe(p: Path) -> pd.DataFrame:
-    if not isinstance(p, Path):
-        p = Path(p)
-    if p.exists():
+def _call_scanner(mod: Any, preferred: list[str], kwargs: dict) -> Any:
+    """Call the first available function from `preferred` with kwargs."""
+    for name in preferred:
+        fn = getattr(mod, name, None)
+        if callable(fn):
+            return fn(**kwargs)
+    raise RuntimeError(
+        f"No callable scan entry point found. Tried: {', '.join(preferred)}"
+    )
+
+
+def _to_dataframe(data: Any) -> pd.DataFrame:
+    """Convert list[dict] / DataFrame / None into a DataFrame."""
+    if data is None:
+        return pd.DataFrame()
+    if isinstance(data, pd.DataFrame):
+        return data
+    if isinstance(data, Iterable):
         try:
-            return pd.read_csv(p)
+            return pd.DataFrame(list(data))
         except Exception:
-            return pd.DataFrame()
+            pass
     return pd.DataFrame()
 
 
-def _ensure_parent(p: Path) -> None:
-    p.parent.mkdir(parents=True, exist_ok=True)
-
-
 def _normalize_ec2(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Make EC2 data consistent for the UI:
-    - Ensure expected columns exist (filled with defaults when missing).
-    - Coerce numeric types.
-    - Keep a stable column order for display.
-    """
+    """Ensure expected EC2 columns and types for the UI."""
     if df is None or df.empty:
         return _empty_ec2_frame()
 
     df = df.copy()
 
-    # Column mapping aliases (in case your scanner used slightly different names)
+    # Aliases to harmonize different scanner field names
     alias_map = {
         "avg_cpu": "avg_cpu_7d",
         "cpu_avg_7d": "avg_cpu_7d",
         "monthly_usd": "monthly_cost_usd",
         "cost_monthly_usd": "monthly_cost_usd",
+        "type_": "type",
     }
     for old, new in alias_map.items():
         if old in df.columns and new not in df.columns:
             df[new] = df[old]
 
-    # Ensure required columns exist
-    for col, default in {
+    # Ensure required columns
+    required_defaults = {
         "instance_id": "",
         "name": "",
         "instance_type": "",
@@ -151,15 +120,16 @@ def _normalize_ec2(df: pd.DataFrame) -> pd.DataFrame:
         "monthly_cost_usd": 0.0,
         "recommendation": "",
         "type": "ec2_instance",
-    }.items():
+    }
+    for col, default in required_defaults.items():
         if col not in df.columns:
             df[col] = default
 
-    # Coerce dtypes
+    # Coerce numeric
     df["avg_cpu_7d"] = _coerce_float(df["avg_cpu_7d"])
     df["monthly_cost_usd"] = _coerce_float(df["monthly_cost_usd"])
 
-    # Preferred column order
+    # Stable column order
     cols = [
         "instance_id",
         "name",
@@ -175,30 +145,26 @@ def _normalize_ec2(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _normalize_s3(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Make S3 data consistent for the UI:
-    - Ensure expected columns exist (filled with defaults when missing).
-    - Coerce numeric types.
-    - Keep a stable column order for display.
-    """
+    """Ensure expected S3 columns and types for the UI."""
     if df is None or df.empty:
         return _empty_s3_frame()
 
     df = df.copy()
 
-    # Column mapping aliases
+    # Aliases
     alias_map = {
         "cold_gb": "standard_cold_gb",
         "cold_objects": "standard_cold_objects",
         "size_gb": "size_total_gb",
         "objects": "objects_total",
+        "type_": "type",
     }
     for old, new in alias_map.items():
         if old in df.columns and new not in df.columns:
             df[new] = df[old]
 
-    # Ensure required columns exist
-    for col, default in {
+    # Ensure required columns
+    required_defaults = {
         "bucket": "",
         "region": "",
         "size_total_gb": 0.0,
@@ -209,15 +175,16 @@ def _normalize_s3(df: pd.DataFrame) -> pd.DataFrame:
         "recommendation": "",
         "notes": "",
         "type": "s3_bucket_summary",
-    }.items():
+    }
+    for col, default in required_defaults.items():
         if col not in df.columns:
             df[col] = default
 
-    # Coerce dtypes
+    # Coerce numeric
     df["size_total_gb"] = _coerce_float(df["size_total_gb"])
     df["standard_cold_gb"] = _coerce_float(df["standard_cold_gb"])
 
-    # Preferred column order
+    # Stable column order
     cols = [
         "bucket",
         "region",
@@ -271,4 +238,3 @@ def _coerce_float(series: pd.Series) -> pd.Series:
         return pd.to_numeric(series, errors="coerce").fillna(0.0)
     except Exception:
         return series
-

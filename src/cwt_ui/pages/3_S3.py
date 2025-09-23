@@ -2,7 +2,6 @@
 from __future__ import annotations
 import pandas as pd
 import streamlit as st
-from typing import Optional
 
 def _to_float(x, default: float = 0.0) -> float:
     try:
@@ -10,8 +9,13 @@ def _to_float(x, default: float = 0.0) -> float:
     except Exception:
         return default
 
+def _to_bool(x) -> bool | None:
+    s = str(x).strip().lower()
+    if s in {"true", "1", "yes"}:  return True
+    if s in {"false", "0", "no"}:  return False
+    return None
+
 def _cold_flag(v) -> str:
-    """Emoji/marker for recommendation column."""
     txt = str(v).strip().upper()
     return "🟢" if txt == "OK" else "🔴"
 
@@ -20,7 +24,7 @@ def _prep(df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
     out = df.copy()
 
-    # Ensure expected columns exist (avoid key errors)
+    # ensure expected columns exist
     for col in [
         "bucket","region","size_total_gb","objects_total",
         "standard_cold_gb","standard_cold_objects",
@@ -29,47 +33,39 @@ def _prep(df: pd.DataFrame) -> pd.DataFrame:
         if col not in out.columns:
             out[col] = None
 
-    # Normalize numeric columns
+    # numeric normalization
     for col in ["size_total_gb","standard_cold_gb"]:
-        out[col] = out[col].apply(_to_float)
+        out[col] = out[col].apply(_to_float).fillna(0.0)
 
     for col in ["objects_total","standard_cold_objects"]:
         out[col] = pd.to_numeric(out[col], errors="coerce").fillna(0).astype(int)
 
-    # Derive % cold of total (GB)
-    with pd.option_context("mode.use_inf_as_na", True):
-        out["cold_ratio"] = (
-            (out["standard_cold_gb"] / out["size_total_gb"])
-            .replace([pd.NA, pd.NaT], 0)
-            .fillna(0)
-        )
-        out.loc[out["size_total_gb"] <= 0, "cold_ratio"] = 0.0
+    # lifecycle -> bool where possible
+    out["lifecycle_defined_bool"] = out["lifecycle_defined"].map(_to_bool)
 
-    # Status fallback if missing
+    # cold ratio (0..1)
+    denom = out["size_total_gb"].replace(0, pd.NA)
+    ratio = out["standard_cold_gb"] / denom
+    out["cold_ratio"] = ratio.clip(lower=0, upper=1).fillna(0.0)
+
+    # status fallback
     if "status" not in out or out["status"].isna().all():
         out["status"] = out["recommendation"].astype(str).str.upper().map(
             lambda x: "🟢 OK" if x == "OK" else "🔴 Action"
         )
-
     return out
 
 def _summary(df: pd.DataFrame) -> tuple[float, int, float, int]:
-    """Return (total_gb, total_objects, total_cold_gb, total_cold_objects)."""
     if df is None or df.empty:
         return 0.0, 0, 0.0, 0
-    total_gb = float(df["size_total_gb"].sum())
-    total_objs = int(df["objects_total"].sum())
-    cold_gb = float(df["standard_cold_gb"].sum())
-    cold_objs = int(df["standard_cold_objects"].sum())
-    return total_gb, total_objs, cold_gb, cold_objs
+    return (
+        float(df["size_total_gb"].sum()),
+        int(df["objects_total"].sum()),
+        float(df["standard_cold_gb"].sum()),
+        int(df["standard_cold_objects"].sum()),
+    )
 
 def render(s3_df: pd.DataFrame, tables, formatters) -> None:
-    """
-    Render S3 details page:
-      - Filters (region, lifecycle flag, recommendation)
-      - KPI bar (totals)
-      - Buckets table with formatting and flags
-    """
     st.header("S3")
 
     df = _prep(s3_df)
@@ -97,14 +93,16 @@ def render(s3_df: pd.DataFrame, tables, formatters) -> None:
 
     if lifecycle_sel != "Any":
         want = (lifecycle_sel == "True")
-        filtered = filtered[filtered["lifecycle_defined"].astype(str).str.lower().isin(["true" if want else "false"])]
+        # prefer the coerced bool column; fall back to string matching if needed
+        has_bool = filtered["lifecycle_defined_bool"].notna()
+        filtered = filtered[
+            (has_bool & (filtered["lifecycle_defined_bool"] == want)) |
+            (~has_bool & (filtered["lifecycle_defined"].astype(str).str.lower() == ("true" if want else "false")))
+        ]
 
     if reco_sel != "Any":
-        if reco_sel == "OK":
-            mask = filtered["recommendation"].astype(str).str.upper().eq("OK")
-        else:
-            mask = ~filtered["recommendation"].astype(str).str.upper().eq("OK")
-        filtered = filtered[mask]
+        is_ok = filtered["recommendation"].astype(str).str.upper().eq("OK")
+        filtered = filtered[is_ok] if reco_sel == "OK" else filtered[~is_ok]
 
     if name_query:
         q = name_query.strip().lower()
@@ -119,34 +117,24 @@ def render(s3_df: pd.DataFrame, tables, formatters) -> None:
     c4.metric("Cold objects", f"{cold_objs:,}")
 
     # --- Table ---
-    # Column order for a clean view
     column_order = [
-        "status",
-        "bucket",
-        "region",
-        "size_total_gb",
-        "objects_total",
-        "standard_cold_gb",
-        "standard_cold_objects",
-        "cold_ratio",
-        "lifecycle_defined",
-        "recommendation",
-        "notes",
+        "status","bucket","region","size_total_gb","objects_total",
+        "standard_cold_gb","standard_cold_objects","cold_ratio",
+        "lifecycle_defined","recommendation","notes",
     ]
 
-    # Numeric formatters
     numeric_formatters = {
-        "size_total_gb": formatters.human_gb,
-        "standard_cold_gb": formatters.human_gb,
-        "cold_ratio": (lambda x: formatters.percent(float(x) * 100, 2)),  # expects 0..1 -> show as %
+        "size_total_gb":      lambda x: formatters.human_gb(x, 2),
+        "standard_cold_gb":   lambda x: formatters.human_gb(x, 2),
+        "cold_ratio":         (lambda x: formatters.percent(float(x) * 100, 2)),  # 0..1 -> %
+        "objects_total":      (lambda x: f"{int(float(x)):,}" if str(x).strip() != "" else x),
+        "standard_cold_objects": (lambda x: f"{int(float(x)):,}" if str(x).strip() != "" else x),
     }
 
-    # Highlight flags (will render *_flag columns via tables.render)
     highlight_rules = {
         "recommendation": _cold_flag
     }
 
-    # Sort by cold GB desc to surface biggest wins
     display_df = filtered.sort_values("standard_cold_gb", ascending=False)
 
     tables.render(
@@ -156,8 +144,4 @@ def render(s3_df: pd.DataFrame, tables, formatters) -> None:
         highlight_rules=highlight_rules,
     )
 
-    # --- Notes ---
-    st.caption(
-        "Tip: Buckets with high 'Cold size (GB)' and lifecycle_defined=False are prime candidates for lifecycle policies."
-    )
-
+    st.caption("Tip: buckets with high Cold size and no lifecycle are prime candidates for lifecycle policies.")

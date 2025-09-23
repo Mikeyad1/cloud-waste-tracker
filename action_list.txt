@@ -1,2 +1,0 @@
-# EC2 i-06de05f0f6baefc49 — test-server (t3.micro) ~ $7.49/mo
-aws ec2 stop-instances --instance-ids i-06de05f0f6baefc49 --region us-east-1

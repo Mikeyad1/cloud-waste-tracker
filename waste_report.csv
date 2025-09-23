@@ -1,2 +1,0 @@
-avg_cpu_7d,instance_id,instance_type,monthly_cost_usd,name,recommendation,region,type
-0.15,i-06de05f0f6baefc49,t3.micro,7.49,test-server,Stop or downsize,us-east-1,idle_instance

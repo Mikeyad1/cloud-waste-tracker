@@ -1,2 +1,0 @@
-bucket,lifecycle_defined,notes,objects_total,recommendation,region,size_total_gb,standard_cold_gb,standard_cold_objects,type
-mikey-cloud-test-bucket,True,,2,OK,eu-north-1,0.002,0.0,0,s3_bucket_summary

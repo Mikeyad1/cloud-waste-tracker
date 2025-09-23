@@ -1,3 +1,6 @@
 venv/ 
 __pycache__/ 
 *.pyc
+waste_report.csv
+s3_waste_report.csvwaste_report.csv
+s3_waste_report.csv

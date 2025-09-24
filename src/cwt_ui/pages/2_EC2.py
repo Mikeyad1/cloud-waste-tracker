@@ -132,20 +132,34 @@ def render(ec2_df: pd.DataFrame, tables, formatters) -> None:
 
     filtered = _filtered(df)
 
+    # Rename for clarity before display
+    rename_map = {
+        "status": "Status",
+        "instance_id": "Instance ID",
+        "name": "Name",
+        "instance_type": "Instance Type",
+        "region": "Region",
+        "avg_cpu_7d": "Avg CPU (7d)",
+        "monthly_cost_usd": "Monthly Cost ($)",
+        "recommendation": "Recommendation",
+        "scanned_at": "Scanned At",
+    }
+    filtered = filtered.rename(columns={k: v for k, v in rename_map.items() if k in filtered.columns})
+
     display_cols = [c for c in [
-        "status","instance_id","name","instance_type","region","avg_cpu_7d","monthly_cost_usd","recommendation"
+        "Status","Instance ID","Name","Instance Type","Region","Avg CPU (7d)","Monthly Cost ($)","Recommendation","Scanned At"
     ] if c in filtered.columns]
 
     tables.render(
         filtered[display_cols] if display_cols else filtered,
         column_order=display_cols or None,
         numeric_formatters={
-            "monthly_cost_usd": formatters.currency,
-            "avg_cpu_7d":      (lambda x: f"{_safe_float(x):.2f}"),
+            "Monthly Cost ($)": formatters.currency,
+            "Avg CPU (7d)":      (lambda x: f"{_safe_float(x):.2f}"),
         },
         highlight_rules={
-            "recommendation": (lambda v: "🟢" if str(v).strip().upper() == "OK" else "🔴"),
-            "status":         (lambda v: "🟢 OK" if "🟢" in str(v) or str(v).strip().upper() == "OK" else "🔴 Action"),
+            "Recommendation": (lambda v: "🟢" if str(v).strip().upper() == "OK" else "🔴"),
+            "Status":         (lambda v: "🟢 OK" if "🟢" in str(v) or str(v).strip().upper() == "OK" else "🔴 Action"),
         }
     )
 
@@ -156,7 +170,9 @@ def render(ec2_df: pd.DataFrame, tables, formatters) -> None:
 # Allow running as a Streamlit multipage without main app router
 def _maybe_render_self():
     if st.runtime.exists():  # type: ignore[attr-defined]
-        df = st.session_state.get("ec2_df") or pd.DataFrame()
+        df = st.session_state.get("ec2_df")
+        if df is None:
+            df = pd.DataFrame()
         try:
             from cwt_ui.components import tables as _tables
         except Exception:

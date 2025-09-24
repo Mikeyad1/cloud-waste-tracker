@@ -190,7 +190,14 @@ def render() -> None:
                     ec2_df, s3_df = _scans.run_all_scans(region=region, aws_credentials=creds)
                     st.session_state["ec2_df"] = _add_status(ec2_df)
                     st.session_state["s3_df"] = _add_status(s3_df)
-                    st.success("Live scan completed with current session credentials.")
+                    import datetime as _dt
+                    scanned_at = _dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+                    st.session_state["last_scan_at"] = scanned_at
+                    if not st.session_state["ec2_df"].empty:
+                        st.session_state["ec2_df"]["scanned_at"] = scanned_at
+                    if not st.session_state["s3_df"].empty:
+                        st.session_state["s3_df"]["scanned_at"] = scanned_at
+                    st.success(f"Live scan completed at {scanned_at} (UTC) with current session credentials.")
                 except Exception as e:
                     st.error(f"Scan failed: {e}")
 

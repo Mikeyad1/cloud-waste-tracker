@@ -126,7 +126,17 @@ def run_live_scans(region: str | None) -> tuple[pd.DataFrame, pd.DataFrame]:
             }
 
         ec2_df, s3_df = scans.run_all_scans(region=region, aws_credentials=creds)  # type: ignore
-        return add_status(ec2_df), add_status(s3_df)
+        # Stamp scan time
+        import datetime as _dt
+        scanned_at = _dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+        st.session_state["last_scan_at"] = scanned_at
+        def _stamp(df: pd.DataFrame) -> pd.DataFrame:
+            if df is None or df.empty:
+                return pd.DataFrame()
+            out = df.copy()
+            out["scanned_at"] = scanned_at
+            return out
+        return add_status(_stamp(ec2_df)), add_status(_stamp(s3_df))
     except Exception as e:
         st.warning(f"Live scan failed: {e}")
         return pd.DataFrame(), pd.DataFrame()

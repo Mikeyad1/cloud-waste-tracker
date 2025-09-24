@@ -118,24 +118,41 @@ def render(s3_df: pd.DataFrame, tables, formatters) -> None:
 
     # --- Table ---
     column_order = [
-        "status","bucket","region","size_total_gb","objects_total",
-        "standard_cold_gb","standard_cold_objects","cold_ratio",
-        "lifecycle_defined","recommendation","notes",
+        "Status","Bucket","Region","Total Size (GB)","Objects",
+        "Cold STANDARD (GB)","Cold STANDARD (Objects)","cold_ratio",
+        "Lifecycle Config","Recommendation","Why","Scanned At",
     ]
 
     numeric_formatters = {
-        "size_total_gb":      lambda x: formatters.human_gb(x, 2),
-        "standard_cold_gb":   lambda x: formatters.human_gb(x, 2),
+        "Total Size (GB)":      lambda x: formatters.human_gb(x, 2),
+        "Cold STANDARD (GB)":   lambda x: formatters.human_gb(x, 2),
         "cold_ratio":         (lambda x: formatters.percent(float(x) * 100, 2)),  # 0..1 -> %
-        "objects_total":      (lambda x: f"{int(float(x)):,}" if str(x).strip() != "" else x),
-        "standard_cold_objects": (lambda x: f"{int(float(x)):,}" if str(x).strip() != "" else x),
+        "Objects":      (lambda x: f"{int(float(x)):,}" if str(x).strip() != "" else x),
+        "Cold STANDARD (Objects)": (lambda x: f"{int(float(x)):,}" if str(x).strip() != "" else x),
     }
 
     highlight_rules = {
-        "recommendation": _cold_flag
+        "Recommendation": _cold_flag
     }
 
-    display_df = filtered.sort_values("standard_cold_gb", ascending=False)
+    # Rename for clarity
+    rename_map = {
+        "status": "Status",
+        "bucket": "Bucket",
+        "region": "Region",
+        "size_total_gb": "Total Size (GB)",
+        "objects_total": "Objects",
+        "standard_cold_gb": "Cold STANDARD (GB)",
+        "standard_cold_objects": "Cold STANDARD (Objects)",
+        "lifecycle_defined": "Lifecycle Config",
+        "recommendation": "Recommendation",
+        "notes": "Why",
+        "scanned_at": "Scanned At",
+    }
+    display_df = filtered.rename(columns={k: v for k, v in rename_map.items() if k in filtered.columns})
+    sort_by = "Cold STANDARD (GB)" if "Cold STANDARD (GB)" in display_df.columns else ("standard_cold_gb" if "standard_cold_gb" in display_df.columns else None)
+    if sort_by:
+        display_df = display_df.sort_values(sort_by, ascending=False)
 
     tables.render(
         display_df,

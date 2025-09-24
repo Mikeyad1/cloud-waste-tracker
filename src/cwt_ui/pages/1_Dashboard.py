@@ -47,6 +47,19 @@ def _prepare_ec2_table(ec2_df: pd.DataFrame) -> pd.DataFrame:
     if "avg_cpu_7d" in df.columns:
         df["avg_cpu_7d"] = pd.to_numeric(df["avg_cpu_7d"], errors="coerce").fillna(0.0)
 
+    # Rename for clarity
+    rename_map = {
+        "instance_id": "Instance ID",
+        "name": "Name",
+        "instance_type": "Instance Type",
+        "region": "Region",
+        "avg_cpu_7d": "Avg CPU (7d)",
+        "monthly_cost_usd": "Monthly Cost ($)",
+        "recommendation": "Recommendation",
+        "status": "Status",
+        "scanned_at": "Scanned At",
+    }
+    df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
     return df
 
 
@@ -70,6 +83,20 @@ def _prepare_s3_table(s3_df: pd.DataFrame) -> pd.DataFrame:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0).astype(int)
 
+    rename_map = {
+        "bucket": "Bucket",
+        "region": "Region",
+        "size_total_gb": "Total Size (GB)",
+        "objects_total": "Objects",
+        "standard_cold_gb": "Cold STANDARD (GB)",
+        "standard_cold_objects": "Cold STANDARD (Objects)",
+        "lifecycle_defined": "Lifecycle Config",
+        "recommendation": "Recommendation",
+        "notes": "Why",
+        "status": "Status",
+        "scanned_at": "Scanned At",
+    }
+    df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
     return df
 
 
@@ -84,6 +111,13 @@ def render(ec2_df: pd.DataFrame, s3_df: pd.DataFrame, cards, tables, formatters)
 
     # KPIs
     idle_count, monthly_waste, cold_gb = _compute_summary(ec2_df, s3_df)
+    # Estimated potential savings: sum of monthly cost for actionable EC2 rows
+    potential_savings = 0.0
+    if ec2_df is not None and not ec2_df.empty:
+        mask = ~ec2_df.get("recommendation", pd.Series(index=ec2_df.index, dtype=str)).astype(str).str.upper().eq("OK")
+        if "monthly_cost_usd" in ec2_df.columns:
+            potential_savings = pd.to_numeric(ec2_df.loc[mask, "monthly_cost_usd"], errors="coerce").fillna(0.0).sum()
+    last_scan = st.session_state.get("last_scan_at")
     c1, c2, c3 = st.columns(3)
     with c1:
         cards.metric("Idle EC2 (est.)", str(idle_count), "instances needing action")
@@ -91,6 +125,11 @@ def render(ec2_df: pd.DataFrame, s3_df: pd.DataFrame, cards, tables, formatters)
         cards.metric("Est. Monthly Waste", formatters.currency(monthly_waste))
     with c3:
         cards.metric("S3 Cold GB", f"{cold_gb:,.2f}")
+    c4, c5 = st.columns(2)
+    with c4:
+        cards.metric("Potential Savings (est.)", formatters.currency(potential_savings))
+    with c5:
+        cards.metric("Last Scan", last_scan or "-")
 
     # EC2
     st.subheader("EC2 – Top by Monthly Cost")
@@ -100,12 +139,14 @@ def render(ec2_df: pd.DataFrame, s3_df: pd.DataFrame, cards, tables, formatters)
     else:
         tables.render(
             ec2_tbl,
-            column_order=list(ec2_tbl.columns),
+            column_order=[c for c in [
+                "Status","Instance ID","Name","Instance Type","Region","Avg CPU (7d)","Monthly Cost ($)","Recommendation","Scanned At"
+            ] if c in ec2_tbl.columns],
             numeric_formatters={
-                "monthly_cost_usd": formatters.currency,
-                "avg_cpu_7d": lambda x: f"{float(x):.2f}",
+                "Monthly Cost ($)": formatters.currency,
+                "Avg CPU (7d)": lambda x: f"{float(x):.2f}",
             },
-            highlight_rules={"status": _status_badge},
+            highlight_rules={"Status": _status_badge},
         )
 
     st.divider()
@@ -118,14 +159,16 @@ def render(ec2_df: pd.DataFrame, s3_df: pd.DataFrame, cards, tables, formatters)
     else:
         tables.render(
             s3_tbl,
-            column_order=list(s3_tbl.columns),
+            column_order=[c for c in [
+                "Status","Bucket","Region","Total Size (GB)","Objects","Cold STANDARD (GB)","Cold STANDARD (Objects)","Lifecycle Config","Recommendation","Why","Scanned At"
+            ] if c in s3_tbl.columns],
             numeric_formatters={
-                "size_total_gb": lambda x: formatters.human_gb(x, 2),
-                "standard_cold_gb": lambda x: formatters.human_gb(x, 2),
-                "objects_total": lambda x: f"{int(float(x)):,}" if str(x).strip() != "" else x,
-                "standard_cold_objects": lambda x: f"{int(float(x)):,}" if str(x).strip() != "" else x,
+                "Total Size (GB)": lambda x: formatters.human_gb(x, 2),
+                "Cold STANDARD (GB)": lambda x: formatters.human_gb(x, 2),
+                "Objects": lambda x: f"{int(float(x)):,}" if str(x).strip() != "" else x,
+                "Cold STANDARD (Objects)": lambda x: f"{int(float(x)):,}" if str(x).strip() != "" else x,
             },
-            highlight_rules={"status": _status_badge, "lifecycle_defined": _bool_badge},
+            highlight_rules={"Status": _status_badge, "Lifecycle Config": _bool_badge},
         )
 
 
@@ -191,7 +234,11 @@ def _maybe_render_self():
                     try: return f"{float(x):.{d}f} GB"
                     except Exception: return str(x)
             _formatters = _Fmt()
-        render(ec2_df or pd.DataFrame(), s3_df or pd.DataFrame(), _cards, _tables, _formatters)
+        if ec2_df is None:
+            ec2_df = pd.DataFrame()
+        if s3_df is None:
+            s3_df = pd.DataFrame()
+        render(ec2_df, s3_df, _cards, _tables, _formatters)
 
 
 _maybe_render_self()

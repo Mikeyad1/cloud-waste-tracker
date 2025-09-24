@@ -150,7 +150,7 @@ st.session_state.setdefault("s3_df", pd.DataFrame())
 st.session_state.setdefault("region", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
 
 with st.sidebar:
-    st.header("Controls")
+    st.header("Scan Controls")
 
     # Region selector
     st.session_state["region"] = st.text_input(
@@ -165,9 +165,9 @@ with st.sidebar:
         st.session_state["ec2_df"] = ec2_df
         st.session_state["s3_df"]  = s3_df
 
-    st.caption(f"Repo root: {REPO_ROOT}")
+    st.caption(f"Last scan: {st.session_state.get('last_scan_at','-')}")
     st.divider()
-    page = st.radio("Pages", ["Dashboard", "EC2", "S3", "Settings"])
+    st.caption("Use the Pages sidebar to navigate: Dashboard, EC2, S3, Settings.")
 
 # Optional auto-run is disabled by default to avoid blocking app startup in deployments.
 # Enable by setting env CWT_AUTO_SCAN_ON_START=true
@@ -178,67 +178,7 @@ if auto_scan and st.session_state["ec2_df"].empty and st.session_state["s3_df"].
         st.session_state["ec2_df"] = ec2_df
         st.session_state["s3_df"]  = s3_df
 
-ec2_df = st.session_state["ec2_df"]
-s3_df  = st.session_state["s3_df"]
-
-# === Routing ===
-if page == "Dashboard":
-    if page_dash and hasattr(page_dash, "render"):
-        page_dash.render(ec2_df, s3_df, cards, tables, formatters)
-    else:
-        c1, c2, c3 = st.columns(3)
-        idle, waste, cold = compute_summary(ec2_df, s3_df)
-        with c1: cards.metric("Idle EC2 (est.)", str(idle))
-        with c2: cards.metric("Est. Monthly Waste", formatters.currency(waste))
-        with c3: cards.metric("S3 Cold GB", f"{cold:,.2f}")
-
-        st.subheader("EC2 (Top by Monthly Cost)")
-        if not ec2_df.empty:
-            cols = [c for c in ["status","instance_id","name","instance_type","region","avg_cpu_7d","monthly_cost_usd","recommendation"] if c in ec2_df.columns]
-            df = ec2_df[cols]
-            if "monthly_cost_usd" in df.columns:
-                df = df.sort_values("monthly_cost_usd", ascending=False)
-            tables.render(df, column_order=cols)
-        else:
-            st.info("No EC2 data yet. Click **Run Live Scan**.")
-
-        st.divider()
-        st.subheader("S3 Summary")
-        if not s3_df.empty:
-            cols = [c for c in ["status","bucket","region","size_total_gb","objects_total","standard_cold_gb","standard_cold_objects","lifecycle_defined","recommendation","notes"] if c in s3_df.columns]
-            tables.render(s3_df[cols], column_order=cols)
-        else:
-            st.info("No S3 data yet. Click **Run Live Scan**.")
-
-elif page == "EC2":
-    if page_ec2 and hasattr(page_ec2, "render"):
-        page_ec2.render(ec2_df, tables, formatters)
-    else:
-        st.header("EC2")
-        if not ec2_df.empty:
-            cols = [c for c in ["status","instance_id","name","instance_type","region","avg_cpu_7d","monthly_cost_usd","recommendation"] if c in ec2_df.columns]
-            tables.render(ec2_df[cols], column_order=cols)
-        else:
-            st.info("No EC2 data yet. Click **Run Live Scan**.")
-
-elif page == "S3":
-    if page_s3 and hasattr(page_s3, "render"):
-        page_s3.render(s3_df, tables, formatters)
-    else:
-        st.header("S3")
-        if not s3_df.empty:
-            cols = [c for c in ["status","bucket","region","size_total_gb","objects_total","standard_cold_gb","standard_cold_objects","lifecycle_defined","recommendation","notes"] if c in s3_df.columns]
-            tables.render(s3_df[cols], column_order=cols)
-        else:
-            st.info("No S3 data yet. Click **Run Live Scan**.")
-
-else:
-    if page_set and hasattr(page_set, "render"):
-        page_set.render()
-    else:
-        st.header("Settings")
-        st.write("Auth/Stripe/Scheduler – coming soon.")
-        st.caption("LIVE mode: data is fetched directly from AWS (no CSV, DB optional).")
+st.write("Welcome. Use the Pages sidebar to access Dashboard, EC2, S3, and Settings.")
 
 
 

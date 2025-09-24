@@ -118,6 +118,19 @@ def render(ec2_df: pd.DataFrame, s3_df: pd.DataFrame, cards, tables, formatters)
         if "monthly_cost_usd" in ec2_df.columns:
             potential_savings = pd.to_numeric(ec2_df.loc[mask, "monthly_cost_usd"], errors="coerce").fillna(0.0).sum()
     last_scan = st.session_state.get("last_scan_at")
+    # Cost Explorer summaries (if permissions available)
+    spend_7d = None
+    spend_mtd = None
+    credits_remaining = None
+    try:
+        from cwt_ui.services.scans import get_cost_explorer_client, fetch_spend_summary, fetch_credit_balance
+        ce = get_cost_explorer_client()
+        sums = fetch_spend_summary(ce)
+        spend_7d = sums.get("last_7_days")
+        spend_mtd = sums.get("month_to_date")
+        credits_remaining = fetch_credit_balance(ce)
+    except Exception:
+        pass
     c1, c2, c3 = st.columns(3)
     with c1:
         cards.metric("Idle EC2 (est.)", str(idle_count), "instances needing action")
@@ -125,11 +138,14 @@ def render(ec2_df: pd.DataFrame, s3_df: pd.DataFrame, cards, tables, formatters)
         cards.metric("Est. Monthly Waste", formatters.currency(monthly_waste))
     with c3:
         cards.metric("S3 Cold GB", f"{cold_gb:,.2f}")
-    c4, c5 = st.columns(2)
+    c4, c5, c6 = st.columns(3)
     with c4:
         cards.metric("Potential Savings (est.)", formatters.currency(potential_savings))
     with c5:
-        cards.metric("Last Scan", last_scan or "-")
+        cards.metric("Spend: Last 7d", formatters.currency(spend_7d) if spend_7d is not None else "N/A")
+    with c6:
+        cards.metric("Spend: Month-to-Date", formatters.currency(spend_mtd) if spend_mtd is not None else "N/A")
+    st.caption(f"Last Scan: {last_scan or '-'} | Credits: {formatters.currency(credits_remaining) if credits_remaining is not None else 'N/A'}")
 
     # EC2
     st.subheader("EC2 – Top by Monthly Cost")

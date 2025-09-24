@@ -4,6 +4,7 @@ from typing import Tuple, Optional, Any, Iterable, Mapping
 import os
 from contextlib import contextmanager
 import pandas as pd
+import boto3
 
 # Import scanners from the new location: src/scanners
 try:
@@ -279,3 +280,65 @@ def _temporary_env(new_values: Mapping[str, str]):
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = v
+
+
+# ------------------------------
+# Cost Explorer helpers
+# ------------------------------
+
+def get_cost_explorer_client(region: Optional[str] = None):
+    # Cost Explorer is us-east-1 endpoint regardless of resources region
+    return boto3.client("ce", region_name=region or "us-east-1")
+
+
+def fetch_spend_summary(ce_client, *, days_7: bool = True, month_to_date: bool = True) -> dict:
+    from datetime import datetime, timedelta, timezone
+
+    out: dict[str, float | None] = {"last_7_days": None, "month_to_date": None}
+
+    try:
+        if days_7:
+            end = datetime.now(timezone.utc).date()
+            start = end - timedelta(days=7)
+            resp = ce_client.get_cost_and_usage(
+                TimePeriod={"Start": start.strftime("%Y-%m-%d"), "End": end.strftime("%Y-%m-%d")},
+                Granularity="DAILY",
+                Metrics=["UnblendedCost"],
+            )
+            total = 0.0
+            for p in resp.get("ResultsByTime", []) or []:
+                try:
+                    total += float(p["Total"]["UnblendedCost"]["Amount"])  # type: ignore[index]
+                except Exception:
+                    pass
+            out["last_7_days"] = total
+
+        if month_to_date:
+            end = datetime.now(timezone.utc).date()
+            start = end.replace(day=1)
+            resp = ce_client.get_cost_and_usage(
+                TimePeriod={"Start": start.strftime("%Y-%m-%d"), "End": end.strftime("%Y-%m-%d")},
+                Granularity="MONTHLY",
+                Metrics=["UnblendedCost"],
+            )
+            total = 0.0
+            for p in resp.get("ResultsByTime", []) or []:
+                try:
+                    total += float(p["Total"]["UnblendedCost"]["Amount"])  # type: ignore[index]
+                except Exception:
+                    pass
+            out["month_to_date"] = total
+    except Exception:
+        # Surface as None; UI can show N/A
+        pass
+
+    return out
+
+
+def fetch_credit_balance(ce_client) -> float | None:
+    # Credits are not exposed uniformly; attempt to extract via Dimension/Filter if available
+    # Placeholder: return None so UI shows N/A; extend later when credit APIs are available to you
+    try:
+        return None
+    except Exception:
+        return None

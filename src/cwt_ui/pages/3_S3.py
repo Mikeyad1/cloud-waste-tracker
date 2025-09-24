@@ -167,7 +167,9 @@ def render(s3_df: pd.DataFrame, tables, formatters) -> None:
 # Allow running as a Streamlit multipage without main app router
 def _maybe_render_self():
     if st.runtime.exists():  # type: ignore[attr-defined]
-        df = st.session_state.get("s3_df") or pd.DataFrame()
+        df = st.session_state.get("s3_df")
+        if df is None:
+            df = pd.DataFrame()
         try:
             from cwt_ui.components import tables as _tables
         except Exception:

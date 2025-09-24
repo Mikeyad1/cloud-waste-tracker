@@ -107,7 +107,25 @@ def run_live_scans(region: str | None) -> tuple[pd.DataFrame, pd.DataFrame]:
         st.error("Scans adapter not found: cwt_ui.services.scans.run_all_scans")
         return pd.DataFrame(), pd.DataFrame()
     try:
-        ec2_df, s3_df = scans.run_all_scans(region=region)  # type: ignore
+        # Prepare optional session-scoped AWS credential overrides
+        creds = None
+        if st.session_state.get("aws_override_enabled"):
+            ak = st.session_state.get("aws_access_key_id", "").strip()
+            sk = st.session_state.get("aws_secret_access_key", "").strip()
+            rg = st.session_state.get("aws_default_region", "").strip()
+            stoken = st.session_state.get("aws_session_token", "").strip()
+            creds = {
+                k: v
+                for k, v in {
+                    "AWS_ACCESS_KEY_ID": ak,
+                    "AWS_SECRET_ACCESS_KEY": sk,
+                    "AWS_DEFAULT_REGION": rg or (region or ""),
+                    "AWS_SESSION_TOKEN": stoken,
+                }.items()
+                if v
+            }
+
+        ec2_df, s3_df = scans.run_all_scans(region=region, aws_credentials=creds)  # type: ignore
         return add_status(ec2_df), add_status(s3_df)
     except Exception as e:
         st.warning(f"Live scan failed: {e}")

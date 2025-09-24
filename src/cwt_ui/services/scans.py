@@ -1,6 +1,8 @@
 # src/cwt_ui/services/scans.py
 from __future__ import annotations
-from typing import Tuple, Optional, Any, Iterable
+from typing import Tuple, Optional, Any, Iterable, Mapping
+import os
+from contextlib import contextmanager
 import pandas as pd
 
 # Import scanners from the new location: src/scanners
@@ -19,8 +21,21 @@ except Exception:
 # Public API (used by app.py)
 # ------------------------------
 
-def run_all_scans(region: Optional[str] = None) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Run both scans and return normalized (ec2_df, s3_df)."""
+def run_all_scans(
+    region: Optional[str] = None,
+    *,
+    aws_credentials: Optional[Mapping[str, str]] = None,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Run both scans and return normalized (ec2_df, s3_df).
+
+    If ``aws_credentials`` is provided, it is applied temporarily for the
+    duration of this call via process environment variables only (in-memory).
+    Keys supported: "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+    "AWS_DEFAULT_REGION", "AWS_SESSION_TOKEN" (optional).
+    """
+    if aws_credentials:
+        with _temporary_env(aws_credentials):
+            return scan_ec2(region=region), scan_s3(region=region)
     return scan_ec2(region=region), scan_s3(region=region)
 
 
@@ -238,3 +253,29 @@ def _coerce_float(series: pd.Series) -> pd.Series:
         return pd.to_numeric(series, errors="coerce").fillna(0.0)
     except Exception:
         return series
+
+
+@contextmanager
+def _temporary_env(new_values: Mapping[str, str]):
+    """Temporarily set environment variables, then restore originals.
+
+    Only affects the current process memory; nothing is written to disk.
+    """
+    keys = [
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_DEFAULT_REGION",
+        "AWS_SESSION_TOKEN",
+    ]
+    old: dict[str, Optional[str]] = {k: os.environ.get(k) for k in keys}
+    try:
+        for k in keys:
+            if k in new_values and new_values[k]:
+                os.environ[k] = new_values[k]  # type: ignore[index]
+        yield
+    finally:
+        for k, v in old.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v

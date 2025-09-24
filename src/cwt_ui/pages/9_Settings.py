@@ -5,6 +5,7 @@ import json
 import os
 import datetime as dt
 import streamlit as st
+import pandas as pd
 
 # -------- storage locations (try project root, else user config dir) --------
 PROJECT_ROOT = Path(__file__).resolve().parents[3]  # repo root
@@ -128,6 +129,70 @@ def render() -> None:
                     # hand off to the running session so the app uses it immediately
                     st.session_state["region"] = data["aws"]["default_region"]
                     st.success("AWS settings saved.")
+
+    # --- In-session AWS credential override (memory only) ---
+    with st.expander("AWS Credentials (session only)", expanded=True):
+        st.caption("These fields override environment variables only for this browser session. They are NOT saved to disk.")
+
+        # Initialize session keys
+        st.session_state.setdefault("aws_override_enabled", False)
+        st.session_state.setdefault("aws_access_key_id", "")
+        st.session_state.setdefault("aws_secret_access_key", "")
+        st.session_state.setdefault("aws_default_region", os.getenv("AWS_DEFAULT_REGION", data["aws"].get("default_region", "us-east-1")))
+        st.session_state.setdefault("aws_session_token", "")
+
+        with st.form("aws_runtime_form", clear_on_submit=False):
+            use_override = st.checkbox("Use these credentials for live scans (this session only)", value=st.session_state["aws_override_enabled"])
+            ak = st.text_input("AWS_ACCESS_KEY_ID", value=st.session_state.get("aws_access_key_id", ""))
+            sk = st.text_input("AWS_SECRET_ACCESS_KEY", value=st.session_state.get("aws_secret_access_key", ""), type="password")
+            rg = st.text_input("AWS_DEFAULT_REGION", value=st.session_state.get("aws_default_region", "us-east-1"))
+            stoken = st.text_input("AWS_SESSION_TOKEN (optional)", value=st.session_state.get("aws_session_token", ""), type="password")
+
+            submitted = st.form_submit_button("Apply for this Session")
+            if submitted:
+                # Store only in session_state; do not persist to disk
+                st.session_state["aws_override_enabled"] = bool(use_override)
+                st.session_state["aws_access_key_id"] = ak.strip()
+                st.session_state["aws_secret_access_key"] = sk.strip()
+                st.session_state["aws_default_region"] = (rg or os.getenv("AWS_DEFAULT_REGION", "us-east-1")).strip()
+                st.session_state["aws_session_token"] = stoken.strip()
+                st.session_state["region"] = st.session_state["aws_default_region"] or st.session_state.get("region", "us-east-1")
+                st.success("Applied to current session. Use the sidebar 'Run Live Scan'.")
+
+        # Optional immediate scan action (uses in-memory credentials)
+        def _add_status(df: pd.DataFrame) -> pd.DataFrame:
+            if df is None or df.empty:
+                return pd.DataFrame()
+            out = df.copy()
+            if "recommendation" in out.columns and "status" not in out.columns:
+                out["status"] = out["recommendation"].astype(str).str.upper().map(
+                    lambda x: "🟢 OK" if x == "OK" else "🔴 Action"
+                )
+            return out
+
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("Run Scan Now"):
+                try:
+                    # Local import to avoid circulars
+                    from cwt_ui.services import scans as _scans
+                    creds = None
+                    if st.session_state.get("aws_override_enabled"):
+                        creds = {
+                            k: v for k, v in {
+                                "AWS_ACCESS_KEY_ID": st.session_state.get("aws_access_key_id", "").strip(),
+                                "AWS_SECRET_ACCESS_KEY": st.session_state.get("aws_secret_access_key", "").strip(),
+                                "AWS_DEFAULT_REGION": st.session_state.get("aws_default_region", "").strip(),
+                                "AWS_SESSION_TOKEN": st.session_state.get("aws_session_token", "").strip(),
+                            }.items() if v
+                        }
+                    region = st.session_state.get("region") or st.session_state.get("aws_default_region") or os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+                    ec2_df, s3_df = _scans.run_all_scans(region=region, aws_credentials=creds)
+                    st.session_state["ec2_df"] = _add_status(ec2_df)
+                    st.session_state["s3_df"] = _add_status(s3_df)
+                    st.success("Live scan completed with current session credentials.")
+                except Exception as e:
+                    st.error(f"Scan failed: {e}")
 
     with st.expander("Stripe (Payments)", expanded=False):
         with st.form("stripe_form"):

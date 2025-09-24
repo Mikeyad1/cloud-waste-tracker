@@ -271,3 +271,12 @@ def _validate(cfg: dict) -> list[str]:
        (cfg.get("stripe", {}).get("secret_key") and not cfg["stripe"].get("public_key")):
         issues.append("Both Stripe keys should be provided together (or both empty).")
     return issues
+
+
+# Allow page to render standalone in multipage context (shows only relevant sections)
+def _maybe_render_self():
+    if st.runtime.exists():  # type: ignore[attr-defined]
+        render()
+
+
+_maybe_render_self()

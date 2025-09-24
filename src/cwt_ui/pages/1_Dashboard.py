@@ -1,6 +1,7 @@
 # src/cwt_ui/pages/1_Dashboard.py
 from __future__ import annotations
 import pandas as pd
+import streamlit as st
 
 def _compute_summary(ec2_df: pd.DataFrame, s3_df: pd.DataFrame):
     """Return (idle_count, monthly_waste, cold_gb) from the given frames, robust to missing columns."""
@@ -148,3 +149,49 @@ def _bool_badge(v):
     if s in {"false", "0", "no"}:
         return "🔴 No"
     return v
+
+
+# Allow running as a Streamlit multipage without main app router
+def _maybe_render_self():
+    # Only run if called directly by Streamlit multipage (no router passed frames)
+    if st.runtime.exists():  # type: ignore[attr-defined]
+        ec2_df = st.session_state.get("ec2_df")
+        s3_df = st.session_state.get("s3_df")
+        # Fallback formatters and components if not provided by app router
+        try:
+            from cwt_ui.components import cards as _cards
+        except Exception:
+            class _Cards:
+                @staticmethod
+                def metric(label, value, help_text=None):
+                    st.metric(label, value, help=help_text)
+            _cards = _Cards()
+        try:
+            from cwt_ui.components import tables as _tables
+        except Exception:
+            class _Tables:
+                @staticmethod
+                def render(df: pd.DataFrame, **_):
+                    st.dataframe(df, use_container_width=True)
+            _tables = _Tables()
+        try:
+            from cwt_ui.services import formatters as _formatters
+        except Exception:
+            class _Fmt:
+                @staticmethod
+                def currency(x):
+                    try: return f"${float(x):,.2f}"
+                    except Exception: return str(x)
+                @staticmethod
+                def percent(x, d: int = 2):
+                    try: return f"{float(x):.{d}f}%"
+                    except Exception: return str(x)
+                @staticmethod
+                def human_gb(x, d: int = 2):
+                    try: return f"{float(x):.{d}f} GB"
+                    except Exception: return str(x)
+            _formatters = _Fmt()
+        render(ec2_df or pd.DataFrame(), s3_df or pd.DataFrame(), _cards, _tables, _formatters)
+
+
+_maybe_render_self()

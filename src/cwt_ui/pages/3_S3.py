@@ -145,3 +145,34 @@ def render(s3_df: pd.DataFrame, tables, formatters) -> None:
     )
 
     st.caption("Tip: buckets with high Cold size and no lifecycle are prime candidates for lifecycle policies.")
+
+
+# Allow running as a Streamlit multipage without main app router
+def _maybe_render_self():
+    if st.runtime.exists():  # type: ignore[attr-defined]
+        df = st.session_state.get("s3_df") or pd.DataFrame()
+        try:
+            from cwt_ui.components import tables as _tables
+        except Exception:
+            class _Tables:
+                @staticmethod
+                def render(df: pd.DataFrame, **_):
+                    st.dataframe(df, use_container_width=True)
+            _tables = _Tables()
+        try:
+            from cwt_ui.services import formatters as _formatters
+        except Exception:
+            class _Fmt:
+                @staticmethod
+                def percent(x, d: int = 2):
+                    try: return f"{float(x):.{d}f}%"
+                    except Exception: return str(x)
+                @staticmethod
+                def human_gb(x, d: int = 2):
+                    try: return f"{float(x):.{d}f} GB"
+                    except Exception: return str(x)
+            _formatters = _Fmt()
+        render(df, _tables, _formatters)
+
+
+_maybe_render_self()

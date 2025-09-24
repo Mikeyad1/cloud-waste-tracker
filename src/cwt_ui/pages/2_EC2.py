@@ -151,3 +151,30 @@ def render(ec2_df: pd.DataFrame, tables, formatters) -> None:
 
     st.caption("Export the filtered view:")
     _download_csv_button(filtered[display_cols] if display_cols else filtered)
+
+
+# Allow running as a Streamlit multipage without main app router
+def _maybe_render_self():
+    if st.runtime.exists():  # type: ignore[attr-defined]
+        df = st.session_state.get("ec2_df") or pd.DataFrame()
+        try:
+            from cwt_ui.components import tables as _tables
+        except Exception:
+            class _Tables:
+                @staticmethod
+                def render(df: pd.DataFrame, **_):
+                    st.dataframe(df, use_container_width=True)
+            _tables = _Tables()
+        try:
+            from cwt_ui.services import formatters as _formatters
+        except Exception:
+            class _Fmt:
+                @staticmethod
+                def currency(x):
+                    try: return f"${float(x):,.2f}"
+                    except Exception: return str(x)
+            _formatters = _Fmt()
+        render(df, _tables, _formatters)
+
+
+_maybe_render_self()

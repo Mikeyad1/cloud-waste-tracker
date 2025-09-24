@@ -159,8 +159,10 @@ with st.sidebar:
     st.divider()
     page = st.radio("Pages", ["Dashboard", "EC2", "S3", "Settings"])
 
-# Optionally auto-run once if both frames are empty (comment out if you prefer manual only)
-if st.session_state["ec2_df"].empty and st.session_state["s3_df"].empty:
+# Optional auto-run is disabled by default to avoid blocking app startup in deployments.
+# Enable by setting env CWT_AUTO_SCAN_ON_START=true
+auto_scan = os.getenv("CWT_AUTO_SCAN_ON_START", "false").strip().lower() == "true"
+if auto_scan and st.session_state["ec2_df"].empty and st.session_state["s3_df"].empty:
     with st.spinner("Running initial live scan..."):
         ec2_df, s3_df = run_live_scans(st.session_state["region"])
         st.session_state["ec2_df"] = ec2_df

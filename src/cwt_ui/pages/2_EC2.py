@@ -2,6 +2,21 @@
 from __future__ import annotations
 import pandas as pd
 import streamlit as st
+import os
+
+# === Environment detection and debug mode ===
+APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+
+# Auto-configure debug mode based on environment
+if APP_ENV == "production":
+    DEBUG_MODE = False
+else:
+    DEBUG_MODE = True
+
+def debug_write(message: str):
+    """Write debug message only if DEBUG_MODE is enabled"""
+    if DEBUG_MODE:
+        st.write(message)
 
 # Expected columns (best-effort; the page adapts if some are missing):
 # ["instance_id","name","instance_type","region","avg_cpu_7d","monthly_cost_usd","recommendation","status"]
@@ -111,6 +126,12 @@ def _download_csv_button(df: pd.DataFrame, label="Download CSV", fname="ec2_filt
 
 def render(ec2_df: pd.DataFrame, tables, formatters) -> None:
     st.header("EC2 Instances")
+    
+    # DEBUG: Page load indicator
+    debug_write("🔍 **DEBUG:** EC2 page loaded")
+    debug_write(f"   - EC2 data shape: {ec2_df.shape if not ec2_df.empty else 'EMPTY'}")
+    if not ec2_df.empty:
+        debug_write(f"   - EC2 columns: {list(ec2_df.columns)}")
 
     if ec2_df is None or ec2_df.empty:
         st.info("No EC2 data available.")
@@ -170,9 +191,11 @@ def render(ec2_df: pd.DataFrame, tables, formatters) -> None:
 # Allow running as a Streamlit multipage without main app router
 def _maybe_render_self():
     if st.runtime.exists():  # type: ignore[attr-defined]
+        debug_write("🔍 **DEBUG:** EC2 self-render called")
         df = st.session_state.get("ec2_df")
         if df is None:
             df = pd.DataFrame()
+        debug_write(f"   - Retrieved EC2 data: {df.shape if not df.empty else 'EMPTY'}")
         try:
             from cwt_ui.components import tables as _tables
         except Exception:

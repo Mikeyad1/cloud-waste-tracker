@@ -7,6 +7,8 @@ services:
     startCommand: streamlit run src/cwt_ui/app.py --server.port $PORT --server.address 0.0.0.0
     autoDeploy: true
     envVars:
+      - key: APP_ENV
+        value: production
       - key: PYTHON_VERSION
         value: 3.11.9
       # Optional: theme enforced via TOML already; keep for safety

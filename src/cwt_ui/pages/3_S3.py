@@ -2,6 +2,21 @@
 from __future__ import annotations
 import pandas as pd
 import streamlit as st
+import os
+
+# === Environment detection and debug mode ===
+APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+
+# Auto-configure debug mode based on environment
+if APP_ENV == "production":
+    DEBUG_MODE = False
+else:
+    DEBUG_MODE = True
+
+def debug_write(message: str):
+    """Write debug message only if DEBUG_MODE is enabled"""
+    if DEBUG_MODE:
+        st.write(message)
 
 def _to_float(x, default: float = 0.0) -> float:
     try:
@@ -67,6 +82,12 @@ def _summary(df: pd.DataFrame) -> tuple[float, int, float, int]:
 
 def render(s3_df: pd.DataFrame, tables, formatters) -> None:
     st.header("S3")
+    
+    # DEBUG: Page load indicator
+    debug_write("🔍 **DEBUG:** S3 page loaded")
+    debug_write(f"   - S3 data shape: {s3_df.shape if not s3_df.empty else 'EMPTY'}")
+    if not s3_df.empty:
+        debug_write(f"   - S3 columns: {list(s3_df.columns)}")
 
     df = _prep(s3_df)
     if df.empty:
@@ -167,9 +188,11 @@ def render(s3_df: pd.DataFrame, tables, formatters) -> None:
 # Allow running as a Streamlit multipage without main app router
 def _maybe_render_self():
     if st.runtime.exists():  # type: ignore[attr-defined]
+        debug_write("🔍 **DEBUG:** S3 self-render called")
         df = st.session_state.get("s3_df")
         if df is None:
             df = pd.DataFrame()
+        debug_write(f"   - Retrieved S3 data: {df.shape if not df.empty else 'EMPTY'}")
         try:
             from cwt_ui.components import tables as _tables
         except Exception:

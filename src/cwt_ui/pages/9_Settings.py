@@ -7,6 +7,20 @@ import datetime as dt
 import streamlit as st
 import pandas as pd
 
+# === Environment detection and debug mode ===
+APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+
+# Auto-configure debug mode based on environment
+if APP_ENV == "production":
+    DEBUG_MODE = False
+else:
+    DEBUG_MODE = True
+
+def debug_write(message: str):
+    """Write debug message only if DEBUG_MODE is enabled"""
+    if DEBUG_MODE:
+        st.write(message)
+
 # -------- storage locations (try project root, else user config dir) --------
 PROJECT_ROOT = Path(__file__).resolve().parents[3]  # repo root
 USER_CFG_DIR = Path(os.path.expanduser("~")) / ".cloud_waste_tracker"
@@ -86,6 +100,10 @@ def _mask(s: str, keep: int = 4) -> str:
 def render() -> None:
     st.title("Settings ⚙️")
     st.caption(f"Settings file: `{SETTINGS_PATH}`")
+    
+    # DEBUG: Page load indicator
+    debug_write("🔍 **DEBUG:** Settings page loaded")
+    debug_write(f"   - Settings path: {SETTINGS_PATH}")
 
     data = _load_settings()
 
@@ -283,6 +301,7 @@ def _validate(cfg: dict) -> list[str]:
 # Allow page to render standalone in multipage context (shows only relevant sections)
 def _maybe_render_self():
     if st.runtime.exists():  # type: ignore[attr-defined]
+        debug_write("🔍 **DEBUG:** Settings self-render called")
         render()
 
 

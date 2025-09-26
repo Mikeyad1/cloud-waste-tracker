@@ -2,6 +2,21 @@
 from __future__ import annotations
 import pandas as pd
 import streamlit as st
+import os
+
+# === Environment detection and debug mode ===
+APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+
+# Auto-configure debug mode based on environment
+if APP_ENV == "production":
+    DEBUG_MODE = False
+else:
+    DEBUG_MODE = True
+
+def debug_write(message: str):
+    """Write debug message only if DEBUG_MODE is enabled"""
+    if DEBUG_MODE:
+        st.write(message)
 
 def _compute_summary(ec2_df: pd.DataFrame, s3_df: pd.DataFrame):
     """Return (idle_count, monthly_waste, cold_gb) from the given frames, robust to missing columns."""
@@ -108,6 +123,15 @@ def render(ec2_df: pd.DataFrame, s3_df: pd.DataFrame, cards, tables, formatters)
     - S3 Summary table
     """
     import streamlit as st
+    
+    # DEBUG: Page load indicator
+    debug_write("🔍 **DEBUG:** Dashboard page loaded")
+    debug_write(f"   - EC2 data shape: {ec2_df.shape if not ec2_df.empty else 'EMPTY'}")
+    debug_write(f"   - S3 data shape: {s3_df.shape if not s3_df.empty else 'EMPTY'}")
+    if not ec2_df.empty:
+        debug_write(f"   - EC2 columns: {list(ec2_df.columns)}")
+    if not s3_df.empty:
+        debug_write(f"   - S3 columns: {list(s3_df.columns)}")
 
     # KPIs
     idle_count, monthly_waste, cold_gb = _compute_summary(ec2_df, s3_df)
@@ -214,8 +238,11 @@ def _bool_badge(v):
 def _maybe_render_self():
     # Only run if called directly by Streamlit multipage (no router passed frames)
     if st.runtime.exists():  # type: ignore[attr-defined]
+        debug_write("🔍 **DEBUG:** Dashboard self-render called")
         ec2_df = st.session_state.get("ec2_df")
         s3_df = st.session_state.get("s3_df")
+        debug_write(f"   - Retrieved EC2 data: {ec2_df.shape if ec2_df is not None and not ec2_df.empty else 'EMPTY/NONE'}")
+        debug_write(f"   - Retrieved S3 data: {s3_df.shape if s3_df is not None and not s3_df.empty else 'EMPTY/NONE'}")
         # Fallback formatters and components if not provided by app router
         try:
             from cwt_ui.components import cards as _cards

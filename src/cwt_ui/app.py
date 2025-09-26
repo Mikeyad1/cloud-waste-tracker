@@ -9,7 +9,12 @@ import pandas as pd
 import streamlit as st
 
 # === Streamlit config ===
-st.set_page_config(page_title="Cloud Waste Tracker", page_icon="💸", layout="wide")
+st.set_page_config(
+    page_title="Cloud Waste Tracker", 
+    page_icon="💸", 
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 # === Environment detection and debug mode ===
 APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
@@ -32,6 +37,9 @@ def debug_write(message: str):
     """Write debug message only if DEBUG_MODE is enabled"""
     if DEBUG_MODE:
         st.write(message)
+
+# Debug: Show environment detection (temporary)
+debug_write(f"🔍 **ENV DEBUG:** APP_ENV='{APP_ENV}', DEBUG_MODE={DEBUG_MODE}")
 
 # === Locate repo root & src ===
 APP_DIR = Path(__file__).resolve().parent

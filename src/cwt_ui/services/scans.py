@@ -26,17 +26,39 @@ def run_all_scans(
     region: Optional[str] = None,
     *,
     aws_credentials: Optional[Mapping[str, str]] = None,
+    aws_auth_method: Optional[str] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Run both scans and return normalized (ec2_df, s3_df).
 
     If ``aws_credentials`` is provided, it is applied temporarily for the
     duration of this call via process environment variables only (in-memory).
-    Keys supported: "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+    
+    Args:
+        region: AWS region to scan
+        aws_credentials: Credential mapping for IAM User auth
+        aws_auth_method: "user" or "role" - determines how credentials are used
+    
+    For IAM User auth, keys supported: "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
     "AWS_DEFAULT_REGION", "AWS_SESSION_TOKEN" (optional).
+    
+    For IAM Role auth, keys supported: "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+    "AWS_DEFAULT_REGION", "AWS_ROLE_ARN", "AWS_EXTERNAL_ID", "AWS_ROLE_SESSION_NAME".
     """
-    if aws_credentials:
+    if aws_credentials and aws_auth_method == "role":
+        # Handle role-based authentication
+        role_credentials = _assume_role(aws_credentials)
+        if role_credentials:
+            with _temporary_env(role_credentials):
+                return scan_ec2(region=region), scan_s3(region=region)
+        else:
+            # Fallback to regular credentials if role assumption fails
+            with _temporary_env(aws_credentials):
+                return scan_ec2(region=region), scan_s3(region=region)
+    elif aws_credentials:
+        # Handle user-based authentication
         with _temporary_env(aws_credentials):
             return scan_ec2(region=region), scan_s3(region=region)
+    
     return scan_ec2(region=region), scan_s3(region=region)
 
 
@@ -81,6 +103,68 @@ def scan_s3(region: Optional[str] = None) -> pd.DataFrame:
 # ------------------------------
 # Internal utilities
 # ------------------------------
+
+def _assume_role(credentials: Mapping[str, str]) -> Optional[dict[str, str]]:
+    """Assume an IAM role and return temporary credentials.
+    
+    Args:
+        credentials: Dictionary containing role assumption parameters
+        
+    Returns:
+        Dictionary with temporary credentials or None if assumption fails
+    """
+    try:
+        import boto3
+        from botocore.exceptions import ClientError
+        
+        # Extract role parameters
+        role_arn = credentials.get("AWS_ROLE_ARN", "").strip()
+        external_id = credentials.get("AWS_EXTERNAL_ID", "").strip()
+        session_name = credentials.get("AWS_ROLE_SESSION_NAME", "CloudWasteTracker").strip()
+        region = credentials.get("AWS_DEFAULT_REGION", "us-east-1").strip()
+        
+        if not role_arn:
+            return None
+            
+        # Create STS client with base credentials
+        sts_client = boto3.client(
+            'sts',
+            aws_access_key_id=credentials.get("AWS_ACCESS_KEY_ID", ""),
+            aws_secret_access_key=credentials.get("AWS_SECRET_ACCESS_KEY", ""),
+            region_name=region
+        )
+        
+        # Prepare assume role parameters
+        assume_role_kwargs = {
+            'RoleArn': role_arn,
+            'RoleSessionName': session_name,
+            'DurationSeconds': 3600  # 1 hour
+        }
+        
+        # Add external ID if provided
+        if external_id:
+            assume_role_kwargs['ExternalId'] = external_id
+        
+        # Assume the role
+        response = sts_client.assume_role(**assume_role_kwargs)
+        
+        # Extract temporary credentials
+        creds = response['Credentials']
+        return {
+            'AWS_ACCESS_KEY_ID': creds['AccessKeyId'],
+            'AWS_SECRET_ACCESS_KEY': creds['SecretAccessKey'],
+            'AWS_SESSION_TOKEN': creds['SessionToken'],
+            'AWS_DEFAULT_REGION': region
+        }
+        
+    except ClientError as e:
+        # Log the error but don't raise - let the caller handle gracefully
+        print(f"Failed to assume role {role_arn}: {e}")
+        return None
+    except Exception as e:
+        # Handle any other errors
+        print(f"Unexpected error during role assumption: {e}")
+        return None
 
 def _call_scanner(mod: Any, preferred: list[str], kwargs: dict) -> Any:
     """Call the first available function from `preferred` with kwargs."""

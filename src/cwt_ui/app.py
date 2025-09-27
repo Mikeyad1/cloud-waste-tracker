@@ -16,6 +16,26 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Fix layout alignment
+st.markdown("""
+<style>
+    .main .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+        max-width: 100%;
+    }
+    
+    .main .block-container > div {
+        padding-left: 1rem;
+    }
+    
+    /* Ensure content aligns with sidebar */
+    .stApp > div:first-child {
+        padding-left: 1rem;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 # === Environment detection and debug mode ===
 APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
 
@@ -145,10 +165,12 @@ def run_live_scans(region: str | None) -> tuple[pd.DataFrame, pd.DataFrame]:
         creds = None
         if st.session_state.get("aws_override_enabled"):
             debug_write("🔍 **DEBUG:** Using session-scoped credentials")
+            auth_method = st.session_state.get("aws_auth_method", "user")
             ak = st.session_state.get("aws_access_key_id", "").strip()
             sk = st.session_state.get("aws_secret_access_key", "").strip()
             rg = st.session_state.get("aws_default_region", "").strip()
             stoken = st.session_state.get("aws_session_token", "").strip()
+            
             creds = {
                 k: v
                 for k, v in {
@@ -159,12 +181,26 @@ def run_live_scans(region: str | None) -> tuple[pd.DataFrame, pd.DataFrame]:
                 }.items()
                 if v
             }
+            
+            # Add role-specific fields if using role auth
+            if auth_method == "role":
+                role_fields = {
+                    "AWS_ROLE_ARN": st.session_state.get("aws_role_arn", "").strip(),
+                    "AWS_EXTERNAL_ID": st.session_state.get("aws_external_id", "").strip(),
+                    "AWS_ROLE_SESSION_NAME": st.session_state.get("aws_role_session_name", "CloudWasteTracker").strip(),
+                }
+                creds.update({k: v for k, v in role_fields.items() if v})
+                debug_write(f"   - Role ARN: {role_fields.get('AWS_ROLE_ARN', 'NOT SET')}")
+                debug_write(f"   - External ID: {'SET' if role_fields.get('AWS_EXTERNAL_ID') else 'NOT SET'}")
+            
             debug_write(f"   - Credentials prepared: {list(creds.keys()) if creds else 'NONE'}")
         else:
             debug_write("🔍 **DEBUG:** Using environment credentials")
 
         debug_write("🔍 **DEBUG:** Calling scans.run_all_scans()...")
-        ec2_df, s3_df = scans.run_all_scans(region=region, aws_credentials=creds)  # type: ignore
+        auth_method = st.session_state.get("aws_auth_method", "user")
+        debug_write(f"   - Auth method: {auth_method}")
+        ec2_df, s3_df = scans.run_all_scans(region=region, aws_credentials=creds, aws_auth_method=auth_method)  # type: ignore
         debug_write("🔍 **DEBUG:** scans.run_all_scans() completed")
         # Stamp scan time
         import datetime as _dt

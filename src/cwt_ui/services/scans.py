@@ -44,17 +44,39 @@ def run_all_scans(
     For IAM Role auth, keys supported: "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
     "AWS_DEFAULT_REGION", "AWS_ROLE_ARN", "AWS_EXTERNAL_ID", "AWS_ROLE_SESSION_NAME".
     """
-    if aws_credentials and aws_auth_method == "role":
-        # Handle role-based authentication
-        role_credentials = _assume_role(aws_credentials)
-        if role_credentials:
-            with _temporary_env(role_credentials):
-                return scan_ec2(region=region), scan_s3(region=region)
-        else:
-            # Fallback to regular credentials if role assumption fails
-            with _temporary_env(aws_credentials):
-                return scan_ec2(region=region), scan_s3(region=region)
-    elif aws_credentials:
+    # Check if we should use role authentication from session state
+    if aws_auth_method == "role":
+        # Build credentials from session state if not provided
+        if not aws_credentials:
+            import streamlit as st
+            creds = {}
+            if st.session_state.get("aws_role_arn"):
+                creds["AWS_ROLE_ARN"] = st.session_state.get("aws_role_arn", "")
+                creds["AWS_EXTERNAL_ID"] = st.session_state.get("aws_external_id", "")
+                creds["AWS_ROLE_SESSION_NAME"] = st.session_state.get("aws_role_session_name", "CloudWasteTracker")
+                creds["AWS_DEFAULT_REGION"] = region
+                
+                # For role assumption, we don't need base credentials in the credentials dict
+                # The _assume_role function will use environment variables naturally
+                # when AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are not provided
+                aws_credentials = creds
+        
+        if aws_credentials and "AWS_ROLE_ARN" in aws_credentials:
+            # Handle role-based authentication
+            role_credentials = _assume_role(aws_credentials)
+            if role_credentials:
+                with _temporary_env(role_credentials):
+                    return scan_ec2(region=region), scan_s3(region=region)
+            else:
+                # Role assumption failed - raise an error with details
+                role_arn = aws_credentials.get("AWS_ROLE_ARN", "Unknown")
+                raise Exception(f"Failed to assume IAM role: {role_arn}. Please check:\n"
+                              f"1. Role ARN is correct\n"
+                              f"2. Base credentials have permission to assume the role\n"
+                              f"3. External ID matches the role's trust policy (if required)\n"
+                              f"4. Role trust policy allows the base user/account")
+    
+    if aws_credentials:
         # Handle user-based authentication
         with _temporary_env(aws_credentials):
             return scan_ec2(region=region), scan_s3(region=region)
@@ -124,15 +146,38 @@ def _assume_role(credentials: Mapping[str, str]) -> Optional[dict[str, str]]:
         region = credentials.get("AWS_DEFAULT_REGION", "us-east-1").strip()
         
         if not role_arn:
+            print("ERROR: No role ARN provided")
             return None
             
+        print(f"DEBUG: Attempting to assume role {role_arn}")
+        print(f"DEBUG: External ID: {'SET' if external_id else 'NOT SET'}")
+        print(f"DEBUG: Session Name: {session_name}")
+        print(f"DEBUG: Region: {region}")
+            
         # Create STS client with base credentials
-        sts_client = boto3.client(
-            'sts',
-            aws_access_key_id=credentials.get("AWS_ACCESS_KEY_ID", ""),
-            aws_secret_access_key=credentials.get("AWS_SECRET_ACCESS_KEY", ""),
-            region_name=region
-        )
+        # Use credentials from dict if provided, otherwise let boto3 use environment variables
+        base_ak = credentials.get("AWS_ACCESS_KEY_ID", "")
+        base_sk = credentials.get("AWS_SECRET_ACCESS_KEY", "")
+        
+        if base_ak and base_sk:
+            # Use explicit credentials
+            sts_client = boto3.client(
+                'sts',
+                aws_access_key_id=base_ak,
+                aws_secret_access_key=base_sk,
+                region_name=region
+            )
+        else:
+            # Use environment variables (let boto3 handle it naturally)
+            sts_client = boto3.client('sts', region_name=region)
+        
+        # Test base credentials first
+        try:
+            identity = sts_client.get_caller_identity()
+            print(f"DEBUG: Base credentials work. Caller: {identity.get('Arn', 'Unknown')}")
+        except Exception as e:
+            print(f"DEBUG: Base credentials failed: {e}")
+            return None
         
         # Prepare assume role parameters
         assume_role_kwargs = {
@@ -150,6 +195,8 @@ def _assume_role(credentials: Mapping[str, str]) -> Optional[dict[str, str]]:
         
         # Extract temporary credentials
         creds = response['Credentials']
+        print(f"DEBUG: Successfully assumed role {role_arn}")
+        print(f"DEBUG: Temporary credentials expire at: {creds['Expiration']}")
         return {
             'AWS_ACCESS_KEY_ID': creds['AccessKeyId'],
             'AWS_SECRET_ACCESS_KEY': creds['SecretAccessKey'],
@@ -158,8 +205,21 @@ def _assume_role(credentials: Mapping[str, str]) -> Optional[dict[str, str]]:
         }
         
     except ClientError as e:
-        # Log the error but don't raise - let the caller handle gracefully
-        print(f"Failed to assume role {role_arn}: {e}")
+        error_code = e.response['Error']['Code']
+        error_message = e.response['Error']['Message']
+        print(f"Failed to assume role {role_arn}: {error_code} - {error_message}")
+        
+        # Provide specific guidance based on error code
+        if error_code == "AccessDenied":
+            print("This usually means:")
+            print("1. Base credentials don't have sts:AssumeRole permission")
+            print("2. Role trust policy doesn't allow this user/account")
+            print("3. External ID doesn't match (if required)")
+        elif error_code == "InvalidUserID.NotFound":
+            print("Base credentials are invalid or expired")
+        elif error_code == "ValidationError":
+            print("Role ARN format is incorrect")
+        
         return None
     except Exception as e:
         # Handle any other errors
@@ -283,6 +343,19 @@ def _normalize_s3(df: pd.DataFrame) -> pd.DataFrame:
     # Coerce numeric
     df["size_total_gb"] = _coerce_float(df["size_total_gb"])
     df["standard_cold_gb"] = _coerce_float(df["standard_cold_gb"])
+    
+    # Coerce boolean fields
+    def _coerce_bool(x):
+        if isinstance(x, bool):
+            return x
+        if isinstance(x, str):
+            if x.lower() in ('true', '1', 'yes', 'y'):
+                return True
+            elif x.lower() in ('false', '0', 'no', 'n', '-', ''):
+                return False
+        return bool(x) if x is not None else False
+    
+    df["lifecycle_defined"] = df["lifecycle_defined"].apply(_coerce_bool)
 
     # Stable column order
     cols = [

@@ -16,36 +16,42 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Fix layout alignment
+# Ensure sidebar is always expanded and content aligns properly
+if "sidebar_state" not in st.session_state:
+    st.session_state.sidebar_state = "expanded"
+
+# Simple layout fix - only adjust padding, don't override margins
 st.markdown("""
 <style>
     .main .block-container {
+        padding-left: 1rem;
         padding-top: 2rem;
         padding-bottom: 2rem;
-        max-width: 100%;
-    }
-    
-    .main .block-container > div {
-        padding-left: 1rem;
-    }
-    
-    /* Ensure content aligns with sidebar */
-    .stApp > div:first-child {
-        padding-left: 1rem;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# === Environment detection and debug mode ===
-APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+# Apply layout fixes inline
+def apply_debug_utilities():
+    """Apply debug utilities if in development mode."""
+    import os
+    
+    # Environment detection and debug mode
+    APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+    DEBUG_MODE = APP_ENV == "development"
+    
+    def debug_write(message: str):
+        """Write debug message only if DEBUG_MODE is enabled"""
+        if DEBUG_MODE:
+            st.write(message)
+    
+    return debug_write
 
-# Auto-configure debug mode based on environment
-if APP_ENV == "production":
-    DEBUG_MODE = False
-    # In production, don't load .env file
-else:
-    # Development mode - load .env file and enable debug
-    DEBUG_MODE = True
+debug_write = apply_debug_utilities()
+
+# Load .env in development
+APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+if APP_ENV != "production":
     try:
         from dotenv import load_dotenv
         load_dotenv()  # Load .env file from project root
@@ -53,13 +59,8 @@ else:
         # dotenv not installed, that's okay
         pass
 
-def debug_write(message: str):
-    """Write debug message only if DEBUG_MODE is enabled"""
-    if DEBUG_MODE:
-        st.write(message)
-
 # Debug: Show environment detection (temporary)
-debug_write(f"🔍 **ENV DEBUG:** APP_ENV='{APP_ENV}', DEBUG_MODE={DEBUG_MODE}")
+debug_write(f"🔍 **ENV DEBUG:** APP_ENV='{APP_ENV}'")
 
 # === Locate repo root & src ===
 APP_DIR = Path(__file__).resolve().parent
@@ -254,32 +255,11 @@ else:
     debug_write("🔍 **DEBUG:** Using environment AWS credentials")
 
 with st.sidebar:
-    st.header("Scan Controls")
-
-    # Region selector
-    st.session_state["region"] = st.text_input(
-        "AWS Region",
-        value=st.session_state["region"],
-        help="Defaults to AWS_DEFAULT_REGION; e.g., us-east-1"
-    )
-
-    # Actions
-    if st.button("Run Live Scan"):
-        debug_write("🔍 **DEBUG:** Scan button clicked - starting scan...")
-        ec2_df, s3_df = run_live_scans(st.session_state["region"])
-        debug_write("🔍 **DEBUG:** Scan completed")
-        debug_write(f"   - EC2 results: {ec2_df.shape if not ec2_df.empty else 'EMPTY'}")
-        debug_write(f"   - S3 results: {s3_df.shape if not s3_df.empty else 'EMPTY'}")
-        if not ec2_df.empty:
-            debug_write(f"   - EC2 columns: {list(ec2_df.columns)}")
-        if not s3_df.empty:
-            debug_write(f"   - S3 columns: {list(s3_df.columns)}")
-        st.session_state["ec2_df"] = ec2_df
-        st.session_state["s3_df"]  = s3_df
-
+    st.header("Navigation")
     st.caption(f"Last scan: {st.session_state.get('last_scan_at','-')}")
     st.divider()
     st.caption("Use the Pages sidebar to navigate: Dashboard, EC2, S3, Settings.")
+    st.caption("💡 **Tip:** Run scans from the Dashboard page.")
 
 # Optional auto-run is disabled by default to avoid blocking app startup in deployments.
 # Enable by setting env CWT_AUTO_SCAN_ON_START=true

@@ -16,4 +16,10 @@ font = "sans serif"
 [client]
 toolbarMode = "viewer"
 
+[global]
+developmentMode = false
+
+[runner]
+magicEnabled = false
+
 

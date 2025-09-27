@@ -499,6 +499,272 @@ def _validate(cfg: dict) -> list[str]:
     return issues
 
 
+def _load() -> dict:
+    """Load settings from disk."""
+    try:
+        if SETTINGS_PATH.exists():
+            return json.loads(SETTINGS_PATH.read_text(encoding="utf-8"))
+    except Exception as e:
+        debug_write(f"⚠️ Failed to load settings: {e}")
+    return {}
+
+def _save(cfg: dict) -> None:
+    """Save settings to disk."""
+    try:
+        SETTINGS_PATH.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+    except Exception as e:
+        debug_write(f"⚠️ Failed to save settings: {e}")
+
+def _add_status(df: pd.DataFrame) -> pd.DataFrame:
+    """Add status column to dataframe if it doesn't exist."""
+    if df.empty:
+        return df
+    if "status" not in df.columns:
+        df["status"] = "active"
+    return df
+
+def render():
+    """Main settings page render function."""
+    debug_write("🔍 **DEBUG:** Settings page rendering")
+    
+    st.markdown("""
+    <style>
+        .main .block-container {
+            padding-left: 1rem;
+            padding-top: 2rem;
+            padding-bottom: 2rem;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    st.title("⚙️ Settings")
+    
+    # Load current settings
+    cfg = _load()
+    
+    # AWS Credentials Override Section
+    st.header("🔐 AWS Credentials")
+    st.markdown("Override AWS credentials for live scans (session-only, not saved to disk).")
+    
+    # Authentication method selection (outside form for proper reactivity)
+    use_override = st.checkbox("Use these credentials for live scans (this session only)", value=st.session_state.get("aws_override_enabled", False))
+    
+    current_auth_method = st.radio(
+        "Authentication Method",
+        options=["user", "role"],
+        format_func=lambda x: "IAM User (Access Key + Secret)" if x == "user" else "IAM Role (AssumeRole + External ID)",
+        index=0 if st.session_state.get("aws_auth_method", "user") == "user" else 1,
+        horizontal=True,
+        key="aws_auth_method"
+    )
+    
+    # Show appropriate fields based on auth method
+    if current_auth_method == "user":
+        st.info("🔑 **IAM User Credentials** - Provide your AWS Access Key and Secret Key")
+        st.warning("⚠️ **Security Note**: These credentials are stored in session memory only and never saved to disk.")
+        
+        with st.form("aws_user_form", clear_on_submit=False):
+            ak = st.text_input("AWS_ACCESS_KEY_ID", value="", placeholder="Enter your AWS Access Key ID", type="password")
+            sk = st.text_input("AWS_SECRET_ACCESS_KEY", value="", placeholder="Enter your AWS Secret Access Key", type="password")
+            stoken = st.text_input("AWS_SESSION_TOKEN (optional)", value="", placeholder="Optional: For temporary credentials", type="password", 
+                                 help="Optional: For temporary credentials")
+            rg = st.text_input("AWS_DEFAULT_REGION", value="us-east-1", placeholder="us-east-1")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                submitted = st.form_submit_button("Apply for this Session")
+                if submitted:
+                    st.session_state["aws_override_enabled"] = bool(use_override)
+                    st.session_state["aws_access_key_id"] = ak.strip()
+                    st.session_state["aws_secret_access_key"] = sk.strip()
+                    st.session_state["aws_default_region"] = (rg or os.getenv("AWS_DEFAULT_REGION", "us-east-1")).strip()
+                    st.session_state["aws_session_token"] = stoken.strip()
+                    
+                    st.session_state["aws_role_arn"] = ""
+                    st.session_state["aws_external_id"] = ""
+                    st.session_state["aws_role_session_name"] = "CloudWasteTracker"
+                    
+                    st.session_state["region"] = st.session_state["aws_default_region"] or st.session_state.get("region", "us-east-1")
+                    st.success("Applied to current session. Use the sidebar 'Run Live Scan'.")
+            
+            with col2:
+                has_creds = bool(ak.strip() and sk.strip())
+                test_scan = st.form_submit_button("🚀 Test Scan", disabled=not has_creds,
+                                               help="Test scan with current credentials" if has_creds else "Enter credentials to enable")
+                
+                if test_scan and has_creds:
+                    try:
+                        from cwt_ui.services import scans as _scans
+                        
+                        creds = {
+                            "AWS_ACCESS_KEY_ID": ak.strip(),
+                            "AWS_SECRET_ACCESS_KEY": sk.strip(),
+                            "AWS_DEFAULT_REGION": (rg or os.getenv("AWS_DEFAULT_REGION", "us-east-1")).strip(),
+                            "AWS_SESSION_TOKEN": stoken.strip(),
+                        }
+                        
+                        region = st.session_state.get("region") or rg or os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+                        ec2_df, s3_df = _scans.run_all_scans(region=region, aws_credentials=creds, aws_auth_method="user")
+                        
+                        st.session_state["ec2_df"] = _add_status(ec2_df)
+                        st.session_state["s3_df"] = _add_status(s3_df)
+                        
+                        import datetime as _dt
+                        scanned_at = _dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+                        st.session_state["last_scan_at"] = scanned_at
+                        
+                        if not st.session_state["ec2_df"].empty:
+                            st.session_state["ec2_df"]["scanned_at"] = scanned_at
+                        if not st.session_state["s3_df"].empty:
+                            st.session_state["s3_df"]["scanned_at"] = scanned_at
+                        
+                        st.success(f"✅ Test scan completed at {scanned_at} using IAM User credentials.")
+                        
+                    except Exception as e:
+                        st.error(f"Test scan failed: {e}")
+    
+    else: # current_auth_method == "role"
+        st.info("🔒 **IAM Role Credentials** - More secure, uses temporary credentials via AssumeRole")
+        
+        with st.expander("📋 How to set up IAM Role authentication", expanded=False):
+            st.markdown("""
+            **1. Create an IAM Role:**
+            - Go to AWS IAM Console → Roles → Create Role
+            - Choose "AWS Account" → "Another AWS Account"
+            - Enter your account ID or use "Any" for cross-account access
+            - Attach policies: `AmazonEC2ReadOnlyAccess`, `AmazonS3ReadOnlyAccess`, `CostExplorerReadOnlyAccess`
+            
+            **2. Set up Trust Policy:**
+            ```json
+            {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Principal": {
+                    "AWS": "arn:aws:iam::YOUR-ACCOUNT-ID:user/YOUR-USER"
+                  },
+                  "Action": "sts:AssumeRole",
+                  "Condition": {
+                    "StringEquals": {
+                      "sts:ExternalId": "your-external-id"
+                    }
+                  }
+                }
+              ]
+            }
+            ```
+            
+            **3. Use the Role ARN:**
+            - Copy the Role ARN from the role details page
+            - Enter it in the "Role ARN" field below
+            """)
+        
+        with st.form("aws_role_form", clear_on_submit=False):
+            role_arn = st.text_input("Role ARN", value="", placeholder="arn:aws:iam::123456789012:role/CloudWasteTrackerRole",
+                                   help="ARN of the IAM role to assume (e.g., arn:aws:iam::123456789012:role/CloudWasteTrackerRole)")
+            external_id = st.text_input("External ID", value="", placeholder="Optional external ID for security",
+                                      help="External ID for additional security (optional but recommended)")
+            session_name = st.text_input("Session Name", value="CloudWasteTracker", placeholder="CloudWasteTracker",
+                                       help="Name for this session (will appear in CloudTrail)")
+            rg = st.text_input("AWS_DEFAULT_REGION", value="us-east-1", placeholder="us-east-1")
+            
+            # Check if base credentials are available
+            env_ak = os.getenv("AWS_ACCESS_KEY_ID")
+            env_sk = os.getenv("AWS_SECRET_ACCESS_KEY")
+            
+            # Always use environment credentials if available, otherwise show manual input
+            if env_ak and env_sk and env_ak.strip() and env_sk.strip():
+                st.success("✅ **Base credentials detected** from environment variables")
+                st.caption("Using AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY from environment")
+                st.warning("⚠️ **Security Note**: Base credentials are loaded from environment variables, not displayed here for security.")
+                # Use environment credentials (not displayed)
+                ak = env_ak.strip()
+                sk = env_sk.strip()
+            else:
+                st.warning("⚠️ **No base credentials found** in environment variables")
+                st.caption("Base credentials are required to assume the role")
+                ak = st.text_input("Base AWS_ACCESS_KEY_ID", value="", placeholder="Enter base access key", type="password",
+                                 help="Access key of user/service that can assume the role")
+                sk = st.text_input("Base AWS_SECRET_ACCESS_KEY", value="", placeholder="Enter base secret key", type="password",
+                                 help="Secret key of user/service that can assume the role")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                submitted = st.form_submit_button("Apply for this Session")
+                if submitted:
+                    st.session_state["aws_override_enabled"] = bool(use_override)
+                    st.session_state["aws_access_key_id"] = ak.strip()
+                    st.session_state["aws_secret_access_key"] = sk.strip()
+                    st.session_state["aws_default_region"] = (rg or os.getenv("AWS_DEFAULT_REGION", "us-east-1")).strip()
+                    st.session_state["aws_session_token"] = ""  # Role generates its own
+                    
+                    st.session_state["aws_role_arn"] = role_arn.strip()
+                    st.session_state["aws_external_id"] = external_id.strip()
+                    st.session_state["aws_role_session_name"] = session_name.strip()
+                    
+                    st.session_state["region"] = st.session_state["aws_default_region"] or st.session_state.get("region", "us-east-1")
+                    
+                    if env_ak and env_sk:
+                        st.success("✅ Applied role configuration with environment base credentials. Use the sidebar 'Run Live Scan'.")
+                    else:
+                        st.success("✅ Applied role configuration with manual base credentials. Use the sidebar 'Run Live Scan'.")
+            
+            with col2:
+                has_role_creds = bool(role_arn.strip() and ak and sk)
+                test_scan = st.form_submit_button("🚀 Test Scan", disabled=not has_role_creds,
+                                               help="Test role assumption and scan" if has_role_creds else "Enter role ARN and base credentials to enable")
+                
+                if test_scan and has_role_creds:
+                    try:
+                        from cwt_ui.services import scans as _scans
+                        
+                        # Prepare credentials for role assumption
+                        debug_write(f"🔍 **DEBUG:** IAM Role test scan - using environment credentials naturally")
+                        debug_write(f"🔍 **DEBUG:** Role ARN: {role_arn.strip()}")
+                        debug_write(f"🔍 **DEBUG:** External ID: {'SET' if external_id.strip() else 'NOT SET'}")
+                        
+                        # Store role configuration in session state for this test
+                        st.session_state["aws_role_arn"] = role_arn.strip()
+                        st.session_state["aws_external_id"] = external_id.strip()
+                        st.session_state["aws_role_session_name"] = session_name.strip()
+                        
+                        region = st.session_state.get("region") or rg or os.getenv("AWS_DEFAULT_REGION", "us-east-1")
+                        
+                        # Use the same scan approach as Dashboard - scans service will read from session state
+                        ec2_df, s3_df = _scans.run_all_scans(region=region, aws_credentials=None, aws_auth_method="role")
+                        
+                        st.session_state["ec2_df"] = _add_status(ec2_df)
+                        st.session_state["s3_df"] = _add_status(s3_df)
+                        
+                        import datetime as _dt
+                        scanned_at = _dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+                        st.session_state["last_scan_at"] = scanned_at
+                        
+                        if not st.session_state["ec2_df"].empty:
+                            st.session_state["ec2_df"]["scanned_at"] = scanned_at
+                        if not st.session_state["s3_df"].empty:
+                            st.session_state["s3_df"]["scanned_at"] = scanned_at
+                        
+                        st.success(f"✅ Test scan completed at {scanned_at} using IAM Role (AssumeRole) credentials.")
+                        
+                    except Exception as e:
+                        st.error(f"Test scan failed: {e}")
+    
+    # Clear session data button for debugging
+    if st.button("🗑️ Clear All Session Data", help="Clear all cached credentials and scan data"):
+        keys_to_clear = [
+            "aws_override_enabled", "aws_access_key_id", "aws_secret_access_key", 
+            "aws_default_region", "aws_session_token", "aws_role_arn", 
+            "aws_external_id", "aws_role_session_name", "aws_auth_method",
+            "ec2_df", "s3_df", "last_scan_at", "region"
+        ]
+        for key in keys_to_clear:
+            if key in st.session_state:
+                del st.session_state[key]
+        st.success("✅ All session data cleared")
+        st.rerun()
+
 # Allow page to render standalone in multipage context (shows only relevant sections)
 def _maybe_render_self():
     if st.runtime.exists():  # type: ignore[attr-defined]

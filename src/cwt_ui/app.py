@@ -16,16 +16,42 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# === Environment detection and debug mode ===
-APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+# Ensure sidebar is always expanded and content aligns properly
+if "sidebar_state" not in st.session_state:
+    st.session_state.sidebar_state = "expanded"
 
-# Auto-configure debug mode based on environment
-if APP_ENV == "production":
-    DEBUG_MODE = False
-    # In production, don't load .env file
-else:
-    # Development mode - load .env file and enable debug
-    DEBUG_MODE = True
+# Simple layout fix - only adjust padding, don't override margins
+st.markdown("""
+<style>
+    .main .block-container {
+        padding-left: 1rem;
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Apply layout fixes inline
+def apply_debug_utilities():
+    """Apply debug utilities if in development mode."""
+    import os
+    
+    # Environment detection and debug mode
+    APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+    DEBUG_MODE = APP_ENV == "development"
+    
+    def debug_write(message: str):
+        """Write debug message only if DEBUG_MODE is enabled"""
+        if DEBUG_MODE:
+            st.write(message)
+    
+    return debug_write
+
+debug_write = apply_debug_utilities()
+
+# Load .env in development
+APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+if APP_ENV != "production":
     try:
         from dotenv import load_dotenv
         load_dotenv()  # Load .env file from project root
@@ -33,13 +59,8 @@ else:
         # dotenv not installed, that's okay
         pass
 
-def debug_write(message: str):
-    """Write debug message only if DEBUG_MODE is enabled"""
-    if DEBUG_MODE:
-        st.write(message)
-
 # Debug: Show environment detection (temporary)
-debug_write(f"🔍 **ENV DEBUG:** APP_ENV='{APP_ENV}', DEBUG_MODE={DEBUG_MODE}")
+debug_write(f"🔍 **ENV DEBUG:** APP_ENV='{APP_ENV}'")
 
 # === Locate repo root & src ===
 APP_DIR = Path(__file__).resolve().parent
@@ -145,10 +166,12 @@ def run_live_scans(region: str | None) -> tuple[pd.DataFrame, pd.DataFrame]:
         creds = None
         if st.session_state.get("aws_override_enabled"):
             debug_write("🔍 **DEBUG:** Using session-scoped credentials")
+            auth_method = st.session_state.get("aws_auth_method", "user")
             ak = st.session_state.get("aws_access_key_id", "").strip()
             sk = st.session_state.get("aws_secret_access_key", "").strip()
             rg = st.session_state.get("aws_default_region", "").strip()
             stoken = st.session_state.get("aws_session_token", "").strip()
+            
             creds = {
                 k: v
                 for k, v in {
@@ -159,12 +182,26 @@ def run_live_scans(region: str | None) -> tuple[pd.DataFrame, pd.DataFrame]:
                 }.items()
                 if v
             }
+            
+            # Add role-specific fields if using role auth
+            if auth_method == "role":
+                role_fields = {
+                    "AWS_ROLE_ARN": st.session_state.get("aws_role_arn", "").strip(),
+                    "AWS_EXTERNAL_ID": st.session_state.get("aws_external_id", "").strip(),
+                    "AWS_ROLE_SESSION_NAME": st.session_state.get("aws_role_session_name", "CloudWasteTracker").strip(),
+                }
+                creds.update({k: v for k, v in role_fields.items() if v})
+                debug_write(f"   - Role ARN: {role_fields.get('AWS_ROLE_ARN', 'NOT SET')}")
+                debug_write(f"   - External ID: {'SET' if role_fields.get('AWS_EXTERNAL_ID') else 'NOT SET'}")
+            
             debug_write(f"   - Credentials prepared: {list(creds.keys()) if creds else 'NONE'}")
         else:
             debug_write("🔍 **DEBUG:** Using environment credentials")
 
         debug_write("🔍 **DEBUG:** Calling scans.run_all_scans()...")
-        ec2_df, s3_df = scans.run_all_scans(region=region, aws_credentials=creds)  # type: ignore
+        auth_method = st.session_state.get("aws_auth_method", "user")
+        debug_write(f"   - Auth method: {auth_method}")
+        ec2_df, s3_df = scans.run_all_scans(region=region, aws_credentials=creds, aws_auth_method=auth_method)  # type: ignore
         debug_write("🔍 **DEBUG:** scans.run_all_scans() completed")
         # Stamp scan time
         import datetime as _dt
@@ -218,32 +255,11 @@ else:
     debug_write("🔍 **DEBUG:** Using environment AWS credentials")
 
 with st.sidebar:
-    st.header("Scan Controls")
-
-    # Region selector
-    st.session_state["region"] = st.text_input(
-        "AWS Region",
-        value=st.session_state["region"],
-        help="Defaults to AWS_DEFAULT_REGION; e.g., us-east-1"
-    )
-
-    # Actions
-    if st.button("Run Live Scan"):
-        debug_write("🔍 **DEBUG:** Scan button clicked - starting scan...")
-        ec2_df, s3_df = run_live_scans(st.session_state["region"])
-        debug_write("🔍 **DEBUG:** Scan completed")
-        debug_write(f"   - EC2 results: {ec2_df.shape if not ec2_df.empty else 'EMPTY'}")
-        debug_write(f"   - S3 results: {s3_df.shape if not s3_df.empty else 'EMPTY'}")
-        if not ec2_df.empty:
-            debug_write(f"   - EC2 columns: {list(ec2_df.columns)}")
-        if not s3_df.empty:
-            debug_write(f"   - S3 columns: {list(s3_df.columns)}")
-        st.session_state["ec2_df"] = ec2_df
-        st.session_state["s3_df"]  = s3_df
-
+    st.header("Navigation")
     st.caption(f"Last scan: {st.session_state.get('last_scan_at','-')}")
     st.divider()
     st.caption("Use the Pages sidebar to navigate: Dashboard, EC2, S3, Settings.")
+    st.caption("💡 **Tip:** Run scans from the Dashboard page.")
 
 # Optional auto-run is disabled by default to avoid blocking app startup in deployments.
 # Enable by setting env CWT_AUTO_SCAN_ON_START=true

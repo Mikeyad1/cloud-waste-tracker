@@ -13,6 +13,19 @@ if APP_ENV == "production":
 else:
     DEBUG_MODE = True
 
+
+# Apply layout fixes inline
+st.markdown("""
+<style>
+    .main .block-container {
+        padding-left: 1rem;
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Debug utilities inline
 def debug_write(message: str):
     """Write debug message only if DEBUG_MODE is enabled"""
     if DEBUG_MODE:

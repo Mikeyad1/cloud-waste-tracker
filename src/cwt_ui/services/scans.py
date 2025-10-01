@@ -367,8 +367,15 @@ def _assume_role(credentials: Mapping[str, str]) -> Optional[dict[str, str]]:
                 region_name=region
             )
         else:
-            # Use environment variables (let boto3 handle it naturally)
-            sts_client = boto3.client('sts', region_name=region)
+            # Force boto3 to use only environment variables, not local files
+            import os
+            sts_client = boto3.client(
+                'sts',
+                aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+                aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+                aws_session_token=os.getenv('AWS_SESSION_TOKEN'),
+                region_name=region
+            )
         
         # Test base credentials first
         try:

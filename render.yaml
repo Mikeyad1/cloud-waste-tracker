@@ -17,3 +17,29 @@ services:
       - key: STREAMLIT_THEME_BASE
         value: dark
 
+  - type: worker
+    name: cloud-waste-tracker-worker
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python apps/worker/main.py --region ${AWS_REGION:-us-east-1}
+    autoDeploy: true
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: PYTHON_VERSION
+        value: 3.11.9
+
+  - type: cron
+    name: cloud-waste-tracker-scheduler
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    schedule: "0 * * * *"  # Run every hour
+    startCommand: python apps/worker/main.py --region ${AWS_REGION:-us-east-1}
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: PYTHON_VERSION
+        value: 3.11.9
+

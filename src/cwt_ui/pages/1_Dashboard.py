@@ -160,67 +160,26 @@ def render(ec2_df: pd.DataFrame, s3_df: pd.DataFrame, cards, tables, formatters)
             st.session_state["region"] = region
         
         with col2:
-            if st.button("🚀 Run Live Scan", type="primary", use_container_width=True):
+            if st.button("🔄 Refresh from Database", type="primary", use_container_width=True):
                 try:
-                    # Import scan function
-                    from cwt_ui.services import scans
+                    # Import database function
+                    from db.repo import get_last_scan
                     
-                    debug_write("🔍 **DEBUG:** Dashboard scan button clicked - starting scan...")
+                    debug_write("🔍 **DEBUG:** Dashboard refresh button clicked - loading from database...")
                     
-                    # Prepare credentials if override is enabled
-                    creds = None
-                    auth_method = st.session_state.get("aws_auth_method", "user")
-                    if st.session_state.get("aws_override_enabled"):
-                        debug_write("🔍 **DEBUG:** Using session-scoped credentials")
-                        ak = st.session_state.get("aws_access_key_id", "").strip()
-                        sk = st.session_state.get("aws_secret_access_key", "").strip()
-                        rg = st.session_state.get("aws_default_region", "").strip()
-                        stoken = st.session_state.get("aws_session_token", "").strip()
-                        
-                        creds = {
-                            k: v
-                            for k, v in {
-                                "AWS_ACCESS_KEY_ID": ak,
-                                "AWS_SECRET_ACCESS_KEY": sk,
-                                "AWS_DEFAULT_REGION": rg or region,
-                                "AWS_SESSION_TOKEN": stoken,
-                            }.items()
-                            if v
-                        }
-                        
-                        # Add role-specific fields if using role auth
-                        if auth_method == "role":
-                            role_fields = {
-                                "AWS_ROLE_ARN": st.session_state.get("aws_role_arn", "").strip(),
-                                "AWS_EXTERNAL_ID": st.session_state.get("aws_external_id", "").strip(),
-                                "AWS_ROLE_SESSION_NAME": st.session_state.get("aws_role_session_name", "CloudWasteTracker").strip(),
-                            }
-                            creds.update({k: v for k, v in role_fields.items() if v})
-                            debug_write(f"   - Role ARN: {role_fields.get('AWS_ROLE_ARN', 'NOT SET')}")
-                            debug_write(f"   - External ID: {'SET' if role_fields.get('AWS_EXTERNAL_ID') else 'NOT SET'}")
-                        
-                        debug_write(f"   - Credentials prepared: {list(creds.keys()) if creds else 'NONE'}")
-                    else:
-                        debug_write("🔍 **DEBUG:** Using environment credentials")
-                    
-                    # Run the scan
-                    debug_write(f"   - Auth method: {auth_method}")
-                    ec2_df, s3_df = scans.run_all_scans(region=region, aws_credentials=creds, aws_auth_method=auth_method)
-                    debug_write("🔍 **DEBUG:** Dashboard scan completed")
+                    # Load last scan from database
+                    ec2_df, s3_df, scanned_at = get_last_scan()
+                    debug_write("🔍 **DEBUG:** Database load completed")
                     debug_write(f"   - EC2 results: {ec2_df.shape if not ec2_df.empty else 'EMPTY'}")
                     debug_write(f"   - S3 results: {s3_df.shape if not s3_df.empty else 'EMPTY'}")
+                    debug_write(f"   - Scan timestamp: {scanned_at}")
                     
                     # Update session state with results
                     st.session_state["ec2_df"] = ec2_df
                     st.session_state["s3_df"] = s3_df
-                    
-                    # Add timestamp
-                    import datetime as _dt
-                    scanned_at = _dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
                     st.session_state["last_scan_at"] = scanned_at
-                    debug_write(f"🔍 **DEBUG:** Scan timestamp: {scanned_at}")
                     
-                    # Add timestamp to dataframes
+                    # Add timestamp to dataframes for display
                     if not ec2_df.empty:
                         ec2_df["scanned_at"] = scanned_at
                         st.session_state["ec2_df"] = ec2_df
@@ -228,12 +187,15 @@ def render(ec2_df: pd.DataFrame, s3_df: pd.DataFrame, cards, tables, formatters)
                         s3_df["scanned_at"] = scanned_at
                         st.session_state["s3_df"] = s3_df
                     
-                    st.success(f"✅ Scan completed at {scanned_at}")
+                    if scanned_at:
+                        st.success(f"✅ Data refreshed from database (scanned at {scanned_at})")
+                    else:
+                        st.info("ℹ️ No scan data found in database. Run the worker to populate data.")
                     st.rerun()  # Refresh the page to show new data
                     
                 except Exception as e:
-                    debug_write(f"🔍 **DEBUG:** Dashboard scan failed with error: {e}")
-                    st.error(f"Scan failed: {e}")
+                    debug_write(f"🔍 **DEBUG:** Database refresh failed with error: {e}")
+                    st.error(f"Failed to load data from database: {e}")
         
         st.caption(f"Last scan: {st.session_state.get('last_scan_at', 'Never')}")
         st.divider()
@@ -386,6 +348,21 @@ def _maybe_render_self():
             ec2_df = pd.DataFrame()
         if s3_df is None:
             s3_df = pd.DataFrame()
+        
+        # If no data in session state, try to load from database
+        if ec2_df.empty and s3_df.empty:
+            try:
+                from db.repo import get_last_scan
+                ec2_df, s3_df, scanned_at = get_last_scan()
+                if not ec2_df.empty or not s3_df.empty:
+                    debug_write("🔍 **DEBUG:** Loaded data from database on page load")
+                    # Update session state
+                    st.session_state["ec2_df"] = ec2_df
+                    st.session_state["s3_df"] = s3_df
+                    st.session_state["last_scan_at"] = scanned_at
+            except Exception as e:
+                debug_write(f"🔍 **DEBUG:** Failed to load from database: {e}")
+        
         render(ec2_df, s3_df, _cards, _tables, _formatters)
 
 

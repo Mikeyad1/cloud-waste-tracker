@@ -44,7 +44,14 @@ def _estimate_monthly_cost(instance_type: str):
 
 
 def _aws_client(service: str, region: str):
-    return boto3.client(service, region_name=region)
+    # Use environment variables only, no local credentials file
+    return boto3.client(
+        service, 
+        region_name=region,
+        aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),
+        aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
+        aws_session_token=os.getenv('AWS_SESSION_TOKEN')
+    )
 
 
 # ----------------------

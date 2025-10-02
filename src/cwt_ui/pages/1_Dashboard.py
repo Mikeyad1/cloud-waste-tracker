@@ -163,7 +163,10 @@ def render(ec2_df: pd.DataFrame, s3_df: pd.DataFrame, cards, tables, formatters)
             if st.button("🔄 Refresh from Database", type="primary", use_container_width=True):
                 try:
                     # Import database function
-                    from db.repo import get_last_scan
+                    try:
+                        from db.repo import get_last_scan
+                    except ImportError:
+                        from src.db.repo import get_last_scan
                     
                     debug_write("🔍 **DEBUG:** Dashboard refresh button clicked - loading from database...")
                     
@@ -352,7 +355,10 @@ def _maybe_render_self():
         # If no data in session state, try to load from database
         if ec2_df.empty and s3_df.empty:
             try:
-                from db.repo import get_last_scan
+                try:
+                    from db.repo import get_last_scan
+                except ImportError:
+                    from src.db.repo import get_last_scan
                 ec2_df, s3_df, scanned_at = get_last_scan()
                 if not ec2_df.empty or not s3_df.empty:
                     debug_write("🔍 **DEBUG:** Loaded data from database on page load")

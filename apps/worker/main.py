@@ -1,4 +1,4 @@
-is#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 Worker application for running cloud waste scans and persisting results to database.
 Usage: python apps/worker/main.py --region us-east-1

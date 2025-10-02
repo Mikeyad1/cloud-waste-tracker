@@ -60,6 +60,16 @@ except ImportError:
 # Now check APP_ENV (which may have been loaded from .env)
 APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
 
+# Create database tables on startup (production safety)
+if APP_ENV == "production":
+    try:
+        from db.db import engine
+        from db.models import Base
+        Base.metadata.create_all(engine)
+        print("✅ Database tables ensured on startup")
+    except Exception as e:
+        print(f"⚠️ Database table creation failed: {e}")
+
 # Debug: Show environment detection (temporary)
 debug_write(f"🔍 **ENV DEBUG:** APP_ENV='{APP_ENV}'")
 

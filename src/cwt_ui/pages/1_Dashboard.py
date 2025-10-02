@@ -5,13 +5,14 @@ import streamlit as st
 import os
 
 # === Environment detection and debug mode ===
-APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
-
-# Auto-configure debug mode based on environment
-if APP_ENV == "production":
-    DEBUG_MODE = False
-else:
-    DEBUG_MODE = True
+try:
+    from config.factory import settings
+    DEBUG_MODE = settings.DEBUG
+    APP_ENV = settings.APP_ENV
+except ImportError:
+    # Fallback to old method if config not available
+    APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+    DEBUG_MODE = APP_ENV == "development"
 
 # Apply layout fixes inline
 st.markdown("""
@@ -138,6 +139,13 @@ def render(ec2_df: pd.DataFrame, s3_df: pd.DataFrame, cards, tables, formatters)
     
     # DEBUG: Page load indicator
     debug_write("🔍 **DEBUG:** Dashboard page loaded")
+    
+    # Show feature flags in debug mode
+    try:
+        from cwt_ui.utils.features import show_feature_debug
+        show_feature_debug()
+    except Exception:
+        pass
     debug_write(f"   - EC2 data shape: {ec2_df.shape if not ec2_df.empty else 'EMPTY'}")
     debug_write(f"   - S3 data shape: {s3_df.shape if not s3_df.empty else 'EMPTY'}")
     if not ec2_df.empty:
@@ -201,6 +209,16 @@ def render(ec2_df: pd.DataFrame, s3_df: pd.DataFrame, cards, tables, formatters)
                     st.error(f"Failed to load data from database: {e}")
         
         st.caption(f"Last scan: {st.session_state.get('last_scan_at', 'Never')}")
+        
+        # Advanced filters (feature-flagged)
+        try:
+            from cwt_ui.utils.features import render_advanced_filters
+            filters = render_advanced_filters()
+            if filters:
+                debug_write(f"🔍 **DEBUG:** Advanced filters applied: {filters}")
+        except Exception as e:
+            debug_write(f"🔍 **DEBUG:** Advanced filters failed: {e}")
+        
         st.divider()
 
     # KPIs
@@ -241,12 +259,10 @@ def render(ec2_df: pd.DataFrame, s3_df: pd.DataFrame, cards, tables, formatters)
         cards.metric("Spend: Month-to-Date", formatters.currency(spend_mtd) if spend_mtd is not None else "N/A")
     st.caption(f"Last Scan: {last_scan or '-'} | Credits: {formatters.currency(credits_remaining) if credits_remaining is not None else 'N/A'}")
 
-    # Recent Scans Table
+    # Recent Scans Table (feature-flagged)
     try:
-        from dashboard.recent_scans import get_recent_scans, render_recent_scans_table
-        recent_scans_df = get_recent_scans()
-        render_recent_scans_table(recent_scans_df)
-        st.divider()
+        from cwt_ui.utils.features import render_recent_scans
+        render_recent_scans()
     except Exception as e:
         debug_write(f"🔍 **DEBUG:** Recent scans failed: {e}")
 

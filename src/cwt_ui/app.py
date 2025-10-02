@@ -34,20 +34,25 @@ st.markdown("""
 # Apply layout fixes inline
 def apply_debug_utilities():
     """Apply debug utilities if in development mode."""
-    import os
-    
-    # Environment detection and debug mode
-    APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
-    DEBUG_MODE = APP_ENV == "development"
+    # Import settings from new config system
+    try:
+        from config.factory import settings
+        DEBUG_MODE = settings.DEBUG
+        APP_ENV = settings.APP_ENV
+    except ImportError:
+        # Fallback to old method if config not available
+        import os
+        APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+        DEBUG_MODE = APP_ENV == "development"
     
     def debug_write(message: str):
         """Write debug message only if DEBUG_MODE is enabled"""
         if DEBUG_MODE:
             st.write(message)
     
-    return debug_write
+    return debug_write, APP_ENV
 
-debug_write = apply_debug_utilities()
+debug_write, APP_ENV = apply_debug_utilities()
 
 # Load .env file first (before checking APP_ENV)
 try:

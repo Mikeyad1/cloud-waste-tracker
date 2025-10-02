@@ -24,16 +24,17 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 # Import our modules
-from db.repo import save_scan_results
-from cwt_ui.services.scans import run_all_scans
+from config.factory import settings
+from core.services.scan_service import scan_service
 
 
 def main():
     parser = argparse.ArgumentParser(description="Cloud Waste Tracker - Worker")
-    parser.add_argument("--region", default="us-east-1", help="AWS region to scan")
+    parser.add_argument("--region", default=settings.AWS_DEFAULT_REGION, help="AWS region to scan")
     args = parser.parse_args()
     
     print(f"🔍 Starting scan for region: {args.region}")
+    print(f"🔧 Environment: {settings.APP_ENV}")
     
     try:
         # Prepare AWS credentials from environment variables
@@ -73,26 +74,23 @@ def main():
             print("   Optional: AWS_ROLE_ARN, AWS_EXTERNAL_ID")
             sys.exit(1)
         
-        # Run the scans
+        # Run the scans using the new service
         print("📊 Running EC2 and S3 scans...")
-        ec2_df, s3_df = run_all_scans(
+        ec2_df, s3_df, scanned_at = scan_service.run_full_scan(
             region=args.region, 
             aws_credentials=aws_credentials, 
-            aws_auth_method=aws_auth_method
+            aws_auth_method=aws_auth_method,
+            save_to_db=True
         )
         
-        # Get current timestamp in Israel time (UTC+3)
-        from datetime import timedelta
-        israel_time = datetime.utcnow() + timedelta(hours=3)
-        scanned_at = israel_time.replace(microsecond=0).isoformat() + " (Israel Time)"
-        
-        # Persist results to database
-        print("💾 Saving results to database...")
-        save_scan_results(ec2_df, s3_df, scanned_at)
+        # Generate summary
+        summary = scan_service.get_scan_summary(ec2_df, s3_df)
         
         print(f"✅ Scan completed successfully at {scanned_at}")
-        print(f"   - EC2 findings: {len(ec2_df)}")
-        print(f"   - S3 findings: {len(s3_df)}")
+        print(f"   - EC2 findings: {summary['ec2_instances']}")
+        print(f"   - S3 findings: {summary['s3_buckets']}")
+        print(f"   - Estimated monthly waste: ${summary['estimated_monthly_waste']:.2f}")
+        print(f"   - Cold storage: {summary['cold_storage_gb']:.2f} GB")
         
     except Exception as e:
         print(f"❌ Scan failed: {e}")

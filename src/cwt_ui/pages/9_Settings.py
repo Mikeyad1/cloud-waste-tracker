@@ -256,9 +256,20 @@ def render() -> None:
                             st.session_state["ec2_df"] = _add_status(ec2_df)
                             st.session_state["s3_df"] = _add_status(s3_df)
                             
+                            # Generate timestamp in Israel time
                             import datetime as _dt
-                            scanned_at = _dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+                            from datetime import timedelta
+                            israel_time = _dt.datetime.utcnow() + timedelta(hours=3)
+                            scanned_at = israel_time.replace(microsecond=0).isoformat() + " (Israel Time)"
                             st.session_state["last_scan_at"] = scanned_at
+                            
+                            # Save to database
+                            try:
+                                from db.repo import save_scan_results
+                                save_scan_results(ec2_df, s3_df, scanned_at)
+                                debug_write("🔍 **DEBUG:** Scan results saved to database")
+                            except Exception as e:
+                                debug_write(f"🔍 **DEBUG:** Failed to save to database: {e}")
                             
                             if not st.session_state["ec2_df"].empty:
                                 st.session_state["ec2_df"]["scanned_at"] = scanned_at
@@ -389,9 +400,20 @@ def render() -> None:
                             st.session_state["ec2_df"] = _add_status(ec2_df)
                             st.session_state["s3_df"] = _add_status(s3_df)
                             
+                            # Generate timestamp in Israel time
                             import datetime as _dt
-                            scanned_at = _dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+                            from datetime import timedelta
+                            israel_time = _dt.datetime.utcnow() + timedelta(hours=3)
+                            scanned_at = israel_time.replace(microsecond=0).isoformat() + " (Israel Time)"
                             st.session_state["last_scan_at"] = scanned_at
+                            
+                            # Save to database
+                            try:
+                                from db.repo import save_scan_results
+                                save_scan_results(ec2_df, s3_df, scanned_at)
+                                debug_write("🔍 **DEBUG:** Role scan results saved to database")
+                            except Exception as e:
+                                debug_write(f"🔍 **DEBUG:** Failed to save role scan to database: {e}")
                             
                             if not st.session_state["ec2_df"].empty:
                                 st.session_state["ec2_df"]["scanned_at"] = scanned_at
@@ -609,9 +631,20 @@ def render():
                         st.session_state["ec2_df"] = _add_status(ec2_df)
                         st.session_state["s3_df"] = _add_status(s3_df)
                         
+                        # Generate timestamp in Israel time
                         import datetime as _dt
-                        scanned_at = _dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+                        from datetime import timedelta
+                        israel_time = _dt.datetime.utcnow() + timedelta(hours=3)
+                        scanned_at = israel_time.replace(microsecond=0).isoformat() + " (Israel Time)"
                         st.session_state["last_scan_at"] = scanned_at
+                        
+                        # Save to database
+                        try:
+                            from db.repo import save_scan_results
+                            save_scan_results(ec2_df, s3_df, scanned_at)
+                            debug_write("🔍 **DEBUG:** User scan results saved to database")
+                        except Exception as e:
+                            debug_write(f"🔍 **DEBUG:** Failed to save user scan to database: {e}")
                         
                         if not st.session_state["ec2_df"].empty:
                             st.session_state["ec2_df"]["scanned_at"] = scanned_at
@@ -737,9 +770,20 @@ def render():
                         st.session_state["ec2_df"] = _add_status(ec2_df)
                         st.session_state["s3_df"] = _add_status(s3_df)
                         
+                        # Generate timestamp in Israel time
                         import datetime as _dt
-                        scanned_at = _dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+                        from datetime import timedelta
+                        israel_time = _dt.datetime.utcnow() + timedelta(hours=3)
+                        scanned_at = israel_time.replace(microsecond=0).isoformat() + " (Israel Time)"
                         st.session_state["last_scan_at"] = scanned_at
+                        
+                        # Save to database
+                        try:
+                            from db.repo import save_scan_results
+                            save_scan_results(ec2_df, s3_df, scanned_at)
+                            debug_write("🔍 **DEBUG:** Final role scan results saved to database")
+                        except Exception as e:
+                            debug_write(f"🔍 **DEBUG:** Failed to save final role scan to database: {e}")
                         
                         if not st.session_state["ec2_df"].empty:
                             st.session_state["ec2_df"]["scanned_at"] = scanned_at

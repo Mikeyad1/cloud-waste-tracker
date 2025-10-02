@@ -49,15 +49,16 @@ def apply_debug_utilities():
 
 debug_write = apply_debug_utilities()
 
-# Load .env in development
+# Load .env file first (before checking APP_ENV)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()  # Load .env file from project root
+except ImportError:
+    # dotenv not installed, that's okay
+    pass
+
+# Now check APP_ENV (which may have been loaded from .env)
 APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
-if APP_ENV != "production":
-    try:
-        from dotenv import load_dotenv
-        load_dotenv()  # Load .env file from project root
-    except ImportError:
-        # dotenv not installed, that's okay
-        pass
 
 # Debug: Show environment detection (temporary)
 debug_write(f"🔍 **ENV DEBUG:** APP_ENV='{APP_ENV}'")

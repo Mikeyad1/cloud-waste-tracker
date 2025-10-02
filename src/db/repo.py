@@ -54,9 +54,18 @@ def save_scan_results(ec2_df: pd.DataFrame, s3_df: pd.DataFrame, scanned_at: str
     """שמירת תוצאות סריקה למסד הנתונים"""
     with get_db() as s:
         # Create a new scan record
+        # Parse timestamp - handle both UTC and Israel time formats
+        if "(Israel Time)" in scanned_at:
+            # Remove the suffix and parse as ISO format
+            timestamp_str = scanned_at.replace(" (Israel Time)", "")
+            timestamp = datetime.fromisoformat(timestamp_str)
+        else:
+            # Handle UTC format
+            timestamp = datetime.fromisoformat(scanned_at.replace('Z', '+00:00'))
+        
         scan = Scan(
             user_id=None,  # No user for automated scans
-            started_at=datetime.fromisoformat(scanned_at.replace('Z', '+00:00')),
+            started_at=timestamp,
             finished_at=datetime.utcnow(),
             status="success"
         )

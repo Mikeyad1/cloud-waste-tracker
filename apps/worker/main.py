@@ -10,6 +10,13 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+# Load .env file first
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 # Add src to path for imports
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SRC_DIR = REPO_ROOT / "src"
@@ -74,8 +81,10 @@ def main():
             aws_auth_method=aws_auth_method
         )
         
-        # Get current timestamp
-        scanned_at = datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+        # Get current timestamp in Israel time (UTC+3)
+        from datetime import timedelta
+        israel_time = datetime.utcnow() + timedelta(hours=3)
+        scanned_at = israel_time.replace(microsecond=0).isoformat() + " (Israel Time)"
         
         # Persist results to database
         print("💾 Saving results to database...")

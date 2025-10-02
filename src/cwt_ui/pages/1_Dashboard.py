@@ -241,6 +241,15 @@ def render(ec2_df: pd.DataFrame, s3_df: pd.DataFrame, cards, tables, formatters)
         cards.metric("Spend: Month-to-Date", formatters.currency(spend_mtd) if spend_mtd is not None else "N/A")
     st.caption(f"Last Scan: {last_scan or '-'} | Credits: {formatters.currency(credits_remaining) if credits_remaining is not None else 'N/A'}")
 
+    # Recent Scans Table
+    try:
+        from dashboard.recent_scans import get_recent_scans, render_recent_scans_table
+        recent_scans_df = get_recent_scans()
+        render_recent_scans_table(recent_scans_df)
+        st.divider()
+    except Exception as e:
+        debug_write(f"🔍 **DEBUG:** Recent scans failed: {e}")
+
     # EC2
     st.subheader("EC2 – Top by Monthly Cost")
     ec2_tbl = _prepare_ec2_table(ec2_df)

@@ -7,4 +7,8 @@ s3_waste_report.csv
 *.png
 .env
 
+# Local development database
+local_dev.db
+*.db
+
 

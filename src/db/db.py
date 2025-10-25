@@ -5,10 +5,14 @@ from contextlib import contextmanager
 
 # שליפת DATABASE_URL מהסביבה (Render מגדיר אותו)
 DATABASE_URL = os.getenv("DATABASE_URL")
-if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL is not set in environment variables.")
 
-# יצירת engine ל-Postgres
+# אם אין DATABASE_URL, נשתמש ב-SQLite מקומי לפיתוח
+if not DATABASE_URL:
+    # Use local SQLite database for development
+    DATABASE_URL = "sqlite:///local_dev.db"
+    print("🔍 DEBUG: Using local SQLite database for development")
+
+# יצירת engine (Postgres או SQLite)
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 
 # factory לסשנים

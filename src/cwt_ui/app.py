@@ -101,13 +101,16 @@ def try_import(modpath: str):
 cards      = try_import("cwt_ui.components.cards")
 tables     = try_import("cwt_ui.components.tables")
 formatters = try_import("cwt_ui.services.formatters")
-page_dash  = try_import("cwt_ui.pages.1_Dashboard")
-page_ec2   = try_import("cwt_ui.pages.2_EC2")
-page_s3    = try_import("cwt_ui.pages.3_S3")
-page_set   = try_import("cwt_ui.pages.9_Settings")
+page_dash  = try_import("cwt_ui.pages.Dashboard")
+page_ec2   = try_import("cwt_ui.pages.EC2")  # Use original EC2 page (now enhanced)
+page_s3    = try_import("cwt_ui.pages.S3")   # Use original S3 page (now enhanced)
+page_set   = try_import("cwt_ui.pages.Settings")
 
-# === Scans adapter (LIVE; no CSV) ===
-scans = try_import("cwt_ui.services.scans")
+# === Scans adapter (ENHANCED; with clear recommendations) ===
+scans = try_import("cwt_ui.services.enhanced_scans")
+if scans is None:
+    # Fallback to basic scans
+    scans = try_import("cwt_ui.services.scans")
 
 # === UI fallbacks ===
 def _fb_currency(x):
@@ -121,8 +124,8 @@ if formatters is None or not hasattr(formatters, "currency"):
         @staticmethod
         def currency(x): return _fb_currency(x)
         @staticmethod
-        def percent(x, d: int = 2):
-            try: return f"{float(x):.{d}f}%"
+        def percent(x):
+            try: return f"{float(x):.1f}%"
             except Exception: return str(x)
         @staticmethod
         def human_gb(x, d: int = 2):
@@ -253,6 +256,17 @@ debug_write("🔍 **DEBUG:** Main app.py loaded")
 st.session_state.setdefault("ec2_df", pd.DataFrame())
 st.session_state.setdefault("s3_df", pd.DataFrame())
 st.session_state.setdefault("region", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
+
+# AWS credentials session state defaults
+st.session_state.setdefault("aws_override_enabled", False)
+st.session_state.setdefault("aws_access_key_id", "")
+st.session_state.setdefault("aws_secret_access_key", "")
+st.session_state.setdefault("aws_default_region", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
+st.session_state.setdefault("aws_session_token", "")
+st.session_state.setdefault("aws_role_arn", "")
+st.session_state.setdefault("aws_external_id", "")
+st.session_state.setdefault("aws_role_session_name", "CloudWasteTracker")
+st.session_state.setdefault("aws_auth_method", "user")
 
 # DEBUG: Session state check
 debug_write("🔍 **DEBUG:** Session state initialized")

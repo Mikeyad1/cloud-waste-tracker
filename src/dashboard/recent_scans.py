@@ -19,39 +19,45 @@ def get_recent_scans(limit: int = 3) -> pd.DataFrame:
     Returns:
         DataFrame with columns: scan_time, status
     """
-    with get_db() as s:
-        # Get recent scans, prioritizing finished_at over created_at
-        scans = s.scalars(
-            select(Scan)
-            .order_by(desc(Scan.finished_at), desc(Scan.created_at))
-            .limit(limit)
-        ).all()
-        
-        scan_data = []
-        for scan in scans:
-            # Use finished_at if available, otherwise created_at
-            timestamp = scan.finished_at or scan.created_at
+    try:
+        with get_db() as s:
+            # Get recent scans, prioritizing finished_at over created_at
+            scans = s.scalars(
+                select(Scan)
+                .order_by(desc(Scan.finished_at), desc(Scan.created_at))
+                .limit(limit)
+            ).all()
             
-            if timestamp:
-                # Convert UTC to Israel time (UTC+3)
-                israel_time = timestamp + timedelta(hours=3)
-                time_str = israel_time.strftime("%H:%M:%S")
-            else:
-                time_str = "—"
+            scan_data = []
+            for scan in scans:
+                # Use finished_at if available, otherwise created_at
+                timestamp = scan.finished_at or scan.created_at
+                
+                if timestamp:
+                    # Convert UTC to Israel time (UTC+3)
+                    israel_time = timestamp + timedelta(hours=3)
+                    time_str = israel_time.strftime("%H:%M:%S")
+                else:
+                    time_str = "—"
+                
+                scan_data.append({
+                    "scan_time": time_str,
+                    "status": scan.status or "unknown"
+                })
             
-            scan_data.append({
-                "scan_time": time_str,
-                "status": scan.status or "unknown"
-            })
-        
-        # Fill empty rows if we have fewer than the limit
-        while len(scan_data) < limit:
-            scan_data.append({
-                "scan_time": "—",
-                "status": "—"
-            })
-        
-        return pd.DataFrame(scan_data)
+            # Fill empty rows if we have fewer than the limit
+            while len(scan_data) < limit:
+                scan_data.append({
+                    "scan_time": "—",
+                    "status": "—"
+                })
+            
+            return pd.DataFrame(scan_data)
+            
+    except Exception as e:
+        # If database is corrupted or empty, return empty table gracefully
+        print(f"🔍 DEBUG: Database error in get_recent_scans: {e}")
+        return pd.DataFrame([{"scan_time": "—", "status": "—"}] * limit)
 
 
 def render_recent_scans_table(df: pd.DataFrame) -> None:

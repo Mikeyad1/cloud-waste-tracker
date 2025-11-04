@@ -1,6 +1,6 @@
 # src/cwt_ui/services/scans.py
 from __future__ import annotations
-from typing import Tuple, Optional, Any, Iterable, Mapping
+from typing import Tuple, Optional, Any, Iterable, Mapping, List
 import os
 from contextlib import contextmanager
 import pandas as pd
@@ -23,7 +23,7 @@ except Exception:
 # ------------------------------
 
 def run_all_scans(
-    region: str = "us-east-1", 
+    region: str | List[str] | None = None, 
     aws_credentials: Optional[Mapping[str, str]] = None, 
     aws_auth_method: str = "user"
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -33,7 +33,10 @@ def run_all_scans(
     duration of this call via process environment variables only (in-memory).
     
     Args:
-        region: AWS region to scan
+        region: AWS region(s) to scan. Can be:
+            - Single region string (e.g., "us-east-1")
+            - List of regions (e.g., ["us-east-1", "us-west-2"])
+            - None: auto-discover and scan all enabled regions
         aws_credentials: Credential mapping for IAM User auth
         aws_auth_method: "user" or "role" - determines how credentials are used
     
@@ -53,19 +56,36 @@ def run_all_scans(
                 creds["AWS_ROLE_ARN"] = st.session_state.get("aws_role_arn", "")
                 creds["AWS_EXTERNAL_ID"] = st.session_state.get("aws_external_id", "")
                 creds["AWS_ROLE_SESSION_NAME"] = st.session_state.get("aws_role_session_name", "CloudWasteTracker")
-                creds["AWS_DEFAULT_REGION"] = region
-                
-                # For role assumption, we don't need base credentials in the credentials dict
-                # The _assume_role function will use environment variables naturally
-                # when AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are not provided
+                creds["AWS_DEFAULT_REGION"] = os.getenv("AWS_DEFAULT_REGION", "us-east-1")
                 aws_credentials = creds
         
         if aws_credentials and "AWS_ROLE_ARN" in aws_credentials:
-            # Handle role-based authentication
+            # Handle role-based authentication - ASSUME ROLE FIRST
             role_credentials = _assume_role(aws_credentials)
             if role_credentials:
+                # Use temporary role credentials for everything
                 with _temporary_env(role_credentials):
-                    return scan_ec2(region=region), scan_s3(region=region)
+                    # NOW discover regions with the role credentials
+                    if region is None:
+                        try:
+                            from core.services.region_service import discover_enabled_regions
+                            # Discover regions using temporary role credentials (in env now)
+                            regions = discover_enabled_regions(None, "user")  # Credentials are now in env
+                            print(f"DEBUG: Discovered {len(regions)} regions: {regions}")
+                            if not regions:
+                                print("WARNING: No regions discovered, falling back to common regions")
+                                from core.services.region_service import _common_regions
+                                regions = _common_regions()
+                        except Exception as e:
+                            print(f"ERROR: Region discovery failed: {e}")
+                            from core.services.region_service import _common_regions
+                            regions = _common_regions()
+                    elif isinstance(region, str):
+                        regions = [region]
+                    else:
+                        regions = region
+                    
+                    return _scan_multiple_regions(regions, None, "user")  # Credentials are in env
             else:
                 # Role assumption failed - raise an error with details
                 role_arn = aws_credentials.get("AWS_ROLE_ARN", "Unknown")
@@ -75,12 +95,72 @@ def run_all_scans(
                               f"3. External ID matches the role's trust policy (if required)\n"
                               f"4. Role trust policy allows the base user/account")
     
+    # Normalize region input for non-role auth
+    if region is None:
+        # Auto-discover all enabled regions
+        try:
+            from core.services.region_service import discover_enabled_regions
+            regions = discover_enabled_regions(aws_credentials, aws_auth_method)
+            print(f"DEBUG: Discovered {len(regions)} regions: {regions}")
+            if not regions:
+                from core.services.region_service import _common_regions
+                regions = _common_regions()
+        except Exception as e:
+            print(f"ERROR: Region discovery failed: {e}")
+            from core.services.region_service import _common_regions
+            regions = _common_regions()
+    elif isinstance(region, str):
+        regions = [region]
+    else:
+        regions = region
+    
     if aws_credentials:
         # Handle user-based authentication
         with _temporary_env(aws_credentials):
-            return scan_ec2(region=region), scan_s3(region=region)
+            return _scan_multiple_regions(regions, aws_credentials, aws_auth_method)
     
-    return scan_ec2(region=region), scan_s3(region=region)
+    return _scan_multiple_regions(regions, None, aws_auth_method)
+
+
+def _scan_multiple_regions(
+    regions: List[str],
+    aws_credentials: Optional[Mapping[str, str]],
+    aws_auth_method: str
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """Scan multiple regions and aggregate results."""
+    all_ec2_results = []
+    all_s3_results = []
+    
+    print(f"DEBUG: Starting scan of {len(regions)} regions: {regions}")
+    
+    for region in regions:
+        try:
+            print(f"DEBUG: Scanning region {region}...")
+            ec2_df = scan_ec2(region=region)
+            s3_df = scan_s3(region=region)
+            
+            ec2_count = len(ec2_df) if not ec2_df.empty else 0
+            s3_count = len(s3_df) if not s3_df.empty else 0
+            print(f"DEBUG: Region {region}: Found {ec2_count} EC2 instances, {s3_count} S3 buckets")
+            
+            if not ec2_df.empty:
+                all_ec2_results.append(ec2_df)
+            if not s3_df.empty:
+                all_s3_results.append(s3_df)
+        except Exception as e:
+            # Log error but continue with other regions
+            print(f"⚠️  Error scanning {region}: {e}")
+            import traceback
+            print(traceback.format_exc())
+            continue
+    
+    # Combine results
+    final_ec2 = pd.concat(all_ec2_results, ignore_index=True) if all_ec2_results else pd.DataFrame()
+    final_s3 = pd.concat(all_s3_results, ignore_index=True) if all_s3_results else pd.DataFrame()
+    
+    print(f"DEBUG: Total results: {len(final_ec2)} EC2 instances, {len(final_s3)} S3 buckets")
+    
+    return final_ec2, final_s3
 
 
 def scan_ec2(region: Optional[str] = None) -> pd.DataFrame:
@@ -163,20 +243,24 @@ def _normalize_ec2(df: pd.DataFrame) -> pd.DataFrame:
         "cpu_avg_7d": "avg_cpu_7d",
         "monthly_usd": "monthly_cost_usd",
         "cost_monthly_usd": "monthly_cost_usd",
+        "potential_savings": "potential_savings_usd",
+        "savings": "potential_savings_usd",
         "type_": "type",
     }
     for old, new in alias_map.items():
         if old in df.columns and new not in df.columns:
             df[new] = df[old]
 
-    # Ensure required columns
+    # Ensure required columns (including state for EC2 page)
     required_defaults = {
         "instance_id": "",
         "name": "",
         "instance_type": "",
         "region": "",
+        "state": "unknown",  # Include state: running, stopped, terminated, etc.
         "avg_cpu_7d": 0.0,
         "monthly_cost_usd": 0.0,
+        "potential_savings_usd": 0.0,
         "recommendation": "",
         "type": "ec2_instance",
     }
@@ -187,15 +271,18 @@ def _normalize_ec2(df: pd.DataFrame) -> pd.DataFrame:
     # Coerce numeric
     df["avg_cpu_7d"] = _coerce_float(df["avg_cpu_7d"])
     df["monthly_cost_usd"] = _coerce_float(df["monthly_cost_usd"])
+    df["potential_savings_usd"] = _coerce_float(df["potential_savings_usd"])
 
-    # Stable column order
+    # Stable column order (include state)
     cols = [
         "instance_id",
         "name",
         "instance_type",
         "region",
+        "state",  # Include state for EC2 page
         "avg_cpu_7d",
         "monthly_cost_usd",
+        "potential_savings_usd",
         "recommendation",
         "type",
     ]
@@ -216,6 +303,10 @@ def _normalize_s3(df: pd.DataFrame) -> pd.DataFrame:
         "cold_objects": "standard_cold_objects",
         "size_gb": "size_total_gb",
         "objects": "objects_total",
+        "monthly_usd": "monthly_cost_usd",
+        "cost_monthly_usd": "monthly_cost_usd",
+        "potential_savings": "potential_savings_usd",
+        "savings": "potential_savings_usd",
         "type_": "type",
     }
     for old, new in alias_map.items():
@@ -231,6 +322,8 @@ def _normalize_s3(df: pd.DataFrame) -> pd.DataFrame:
         "standard_cold_gb": 0.0,
         "standard_cold_objects": 0,
         "lifecycle_defined": False,
+        "monthly_cost_usd": 0.0,
+        "potential_savings_usd": 0.0,
         "recommendation": "",
         "notes": "",
         "type": "s3_bucket_summary",
@@ -242,6 +335,8 @@ def _normalize_s3(df: pd.DataFrame) -> pd.DataFrame:
     # Coerce numeric
     df["size_total_gb"] = _coerce_float(df["size_total_gb"])
     df["standard_cold_gb"] = _coerce_float(df["standard_cold_gb"])
+    df["monthly_cost_usd"] = _coerce_float(df["monthly_cost_usd"])
+    df["potential_savings_usd"] = _coerce_float(df["potential_savings_usd"])
 
     # Stable column order
     cols = [
@@ -252,6 +347,8 @@ def _normalize_s3(df: pd.DataFrame) -> pd.DataFrame:
         "standard_cold_gb",
         "standard_cold_objects",
         "lifecycle_defined",
+        "monthly_cost_usd",
+        "potential_savings_usd",
         "recommendation",
         "notes",
         "type",
@@ -269,6 +366,7 @@ def _empty_ec2_frame() -> pd.DataFrame:
             "region",
             "avg_cpu_7d",
             "monthly_cost_usd",
+            "potential_savings_usd",
             "recommendation",
             "type",
         ]
@@ -285,6 +383,8 @@ def _empty_s3_frame() -> pd.DataFrame:
             "standard_cold_gb",
             "standard_cold_objects",
             "lifecycle_defined",
+            "monthly_cost_usd",
+            "potential_savings_usd",
             "recommendation",
             "notes",
             "type",

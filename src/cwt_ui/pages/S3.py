@@ -1,13 +1,7 @@
 import streamlit as st
 import pandas as pd
 import os
-
-def debug_write(message: str):
-    """Write debug message only if DEBUG_MODE is enabled."""
-    APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
-    DEBUG_MODE = APP_ENV != "production"
-    if DEBUG_MODE:
-        st.write(message)
+from cwt_ui.utils.metrics import compute_summary, render_metrics_cards, debug_write
 
 # Load beautiful CSS
 try:
@@ -33,46 +27,14 @@ if s3_df.empty:
     st.info("No S3 data available. Run a scan from the Dashboard to analyze your S3 buckets.")
     st.button("Go to Dashboard", on_click=lambda: st.switch_page("Dashboard"))
 
-# KPIs
-total_cost = s3_df['monthly_cost_usd'].sum() if 'monthly_cost_usd' in s3_df.columns else 0
-potential_savings = s3_df['potential_savings_usd'].sum() if 'potential_savings_usd' in s3_df.columns else 0
-waste_count = len(s3_df)
-savings_percent = (potential_savings / total_cost * 100) if total_cost > 0 else 0
+# Calculate metrics using the shared utility
+summary = compute_summary(s3_df)
+total_cost = summary["total_cost"]
+potential_savings = summary["potential_savings"]
+waste_count = summary["waste_count"]
 
-# Beautiful metrics
-col1, col2, col3, col4 = st.columns(4)
-
-with col1:
-    st.markdown(f"""
-    <div class="beautiful-metric">
-        <div class="beautiful-metric-value">${total_cost:,.2f}</div>
-        <div class="beautiful-metric-label">Total Monthly Cost</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-with col2:
-    st.markdown(f"""
-    <div class="beautiful-metric">
-        <div class="beautiful-metric-value">${potential_savings:,.2f}</div>
-        <div class="beautiful-metric-label">Potential Savings</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-with col3:
-    st.markdown(f"""
-    <div class="beautiful-metric">
-        <div class="beautiful-metric-value">{waste_count}</div>
-        <div class="beautiful-metric-label">Waste Items</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-with col4:
-    st.markdown(f"""
-    <div class="beautiful-metric">
-        <div class="beautiful-metric-value">{savings_percent:.1f}%</div>
-        <div class="beautiful-metric-label">Savings Potential</div>
-    </div>
-    """, unsafe_allow_html=True)
+# Render metrics cards
+render_metrics_cards(total_cost, potential_savings, waste_count)
 
 # Recommendations
 if 'recommendation' in s3_df.columns or 'Recommendation' in s3_df.columns:

@@ -77,11 +77,11 @@ def scan_ec2_idle(region: str) -> List[Dict]:
     cw = _aws_client("cloudwatch", region)
 
     reservations = ec2.describe_instances().get("Reservations", [])
+    # Get ALL instances (not just running) - we need all states
     instances = [
         i
         for r in reservations
         for i in r.get("Instances", [])
-        if i.get("State", {}).get("Name") == "running"
     ]
 
     start, end = _daterange(IDLE_LOOKBACK_DAYS)
@@ -91,22 +91,25 @@ def scan_ec2_idle(region: str) -> List[Dict]:
         instance_id = inst.get("InstanceId")
         itype = inst.get("InstanceType", "?")
         name_tag = next((t["Value"] for t in inst.get("Tags", []) if t.get("Key") == "Name"), "")
+        state = inst.get("State", {}).get("Name", "unknown")  # running, stopped, terminated, etc.
 
-        # Average CPU over lookback window
-        try:
-            resp = cw.get_metric_statistics(
-                Namespace="AWS/EC2",
-                MetricName="CPUUtilization",
-                Dimensions=[{"Name": "InstanceId", "Value": instance_id}],
-                StartTime=start,
-                EndTime=end,
-                Period=3600 * 6,
-                Statistics=["Average"],
-            )
-            dps = resp.get("Datapoints", [])
-            avg_cpu = 0.0 if not dps else sum(dp["Average"] for dp in dps) / len(dps)
-        except ClientError:
-            avg_cpu = -1.0  # couldn't read metrics
+        # Average CPU over lookback window (only for running instances)
+        avg_cpu = -1.0  # Default: unavailable
+        if state == "running":
+            try:
+                resp = cw.get_metric_statistics(
+                    Namespace="AWS/EC2",
+                    MetricName="CPUUtilization",
+                    Dimensions=[{"Name": "InstanceId", "Value": instance_id}],
+                    StartTime=start,
+                    EndTime=end,
+                    Period=3600 * 6,
+                    Statistics=["Average"],
+                )
+                dps = resp.get("Datapoints", [])
+                avg_cpu = 0.0 if not dps else sum(dp["Average"] for dp in dps) / len(dps)
+            except ClientError:
+                avg_cpu = -1.0  # couldn't read metrics
 
         # Calculate accurate monthly cost and savings
         if pricing_service:
@@ -154,10 +157,11 @@ def scan_ec2_idle(region: str) -> List[Dict]:
             "instance_id": instance_id,
             "name": name_tag,
             "instance_type": itype,
-            "avg_cpu_7d": round(avg_cpu, 2),
+            "state": state,  # Include state: running, stopped, terminated, etc.
+            "avg_cpu_7d": round(avg_cpu, 2) if avg_cpu >= 0 else -1.0,
+            "monthly_cost_usd": monthly_cost if state == "running" else 0.0,  # Only cost for running instances
             "recommendation": recommendation,
             "priority": priority,
-            "monthly_cost_usd": monthly_cost,
             "potential_savings_usd": savings_analysis.get("potential_savings", 0),
             "action": savings_analysis.get("action", recommendation),
             "implementation_steps": savings_analysis.get("implementation_steps", []),

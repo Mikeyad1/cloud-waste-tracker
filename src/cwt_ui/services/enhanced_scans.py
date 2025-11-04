@@ -5,48 +5,54 @@ This replaces the basic scans with much more valuable data.
 """
 
 from __future__ import annotations
-from typing import Tuple, Optional, Mapping
+from typing import Tuple, Optional, Mapping, List
 import pandas as pd
 import os
 
 def run_all_scans(
-    region: str = "us-east-1", 
+    region: str | List[str] | None = None, 
     aws_credentials: Optional[Mapping[str, str]] = None, 
     aws_auth_method: str = "user"
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Run enhanced scans with clear cost analysis and actionable recommendations."""
+    """Run enhanced scans with clear cost analysis and actionable recommendations.
     
-    # Import the enhanced scanners
+    Args:
+        region: AWS region(s) to scan. Can be:
+            - Single region string (e.g., "us-east-1")
+            - List of regions (e.g., ["us-east-1", "us-west-2"])
+            - None: auto-discover and scan all enabled regions
+        aws_credentials: Optional credential overrides
+        aws_auth_method: "user" or "role"
+    """
+    # Delegate to the main scans service which handles multi-region logic
     try:
-        from scanners.ec2_scanner import scan_ec2_idle
-        from scanners.s3_scanner_enhanced import scan_s3_waste
-    except ImportError:
-        # Fallback to basic scanners
-        try:
-            from scanners import ec2_scanner as _ec2_scanner
-            from scanners import s3_scanner as _s3_scanner
-            scan_ec2_idle = _ec2_scanner.scan_ec2_idle
-            scan_s3_waste = _s3_scanner.scan_s3_waste
-        except ImportError:
-            return pd.DataFrame(), pd.DataFrame()
-    
-    # Run EC2 scan with enhanced data
-    try:
-        ec2_findings = scan_ec2_idle(region)
-        ec2_df = _enhance_ec2_data(ec2_findings)
+        from cwt_ui.services.scans import run_all_scans as _run_all_scans
+        ec2_df, s3_df = _run_all_scans(region=region, aws_credentials=aws_credentials, aws_auth_method=aws_auth_method)
+        
+        # Enhance the results with better recommendations
+        if not ec2_df.empty:
+            ec2_df = _enhance_ec2_dataframe(ec2_df)
+        if not s3_df.empty:
+            s3_df = _enhance_s3_dataframe(s3_df)
+        
+        return ec2_df, s3_df
     except Exception as e:
-        print(f"EC2 scan error: {e}")
-        ec2_df = pd.DataFrame()
-    
-    # Run S3 scan with enhanced data
-    try:
-        s3_findings = scan_s3_waste(region)
-        s3_df = _enhance_s3_data(s3_findings)
-    except Exception as e:
-        print(f"S3 scan error: {e}")
-        s3_df = pd.DataFrame()
-    
-    return ec2_df, s3_df
+        print(f"Enhanced scan error: {e}")
+        return pd.DataFrame(), pd.DataFrame()
+
+
+def _enhance_ec2_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    """Enhance EC2 DataFrame with clear recommendations."""
+    if df.empty:
+        return df
+    return df.copy()  # Already enhanced by scanners, just pass through for now
+
+
+def _enhance_s3_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    """Enhance S3 DataFrame with clear recommendations."""
+    if df.empty:
+        return df
+    return df.copy()  # Already enhanced by scanners, just pass through for now
 
 
 def _enhance_ec2_data(findings: list) -> pd.DataFrame:

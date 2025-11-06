@@ -8,10 +8,16 @@ import os
 
 
 def debug_write(message: str):
-    """Write debug message only if DEBUG_MODE is enabled."""
-    APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
-    DEBUG_MODE = APP_ENV != "production"
-    if DEBUG_MODE:
+    """Write debug message only if DEBUG_MODE is enabled - checks dynamically each time."""
+    # Check environment dynamically each time to ensure we catch production mode
+    try:
+        from config.factory import settings
+        is_debug = settings.DEBUG
+    except ImportError:
+        app_env = os.getenv("APP_ENV", "development").strip().lower()
+        is_debug = app_env != "production"
+    
+    if is_debug:
         st.write(message)
 
 

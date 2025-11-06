@@ -31,6 +31,14 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# Load .env file first (before checking APP_ENV)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()  # Load .env file from project root
+except ImportError:
+    # dotenv not installed, that's okay
+    pass
+
 # Apply layout fixes inline
 def apply_debug_utilities():
     """Apply debug utilities if in development mode."""
@@ -46,21 +54,22 @@ def apply_debug_utilities():
         DEBUG_MODE = APP_ENV == "development"
     
     def debug_write(message: str):
-        """Write debug message only if DEBUG_MODE is enabled"""
-        if DEBUG_MODE:
+        """Write debug message only if DEBUG_MODE is enabled - checks dynamically each time"""
+        # Check environment dynamically each time to ensure we catch production mode
+        import os
+        try:
+            from config.factory import settings
+            is_debug = settings.DEBUG
+        except ImportError:
+            app_env = os.getenv("APP_ENV", "development").strip().lower()
+            is_debug = app_env != "production"
+        
+        if is_debug:
             st.write(message)
     
     return debug_write, APP_ENV
 
 debug_write, APP_ENV = apply_debug_utilities()
-
-# Load .env file first (before checking APP_ENV)
-try:
-    from dotenv import load_dotenv
-    load_dotenv()  # Load .env file from project root
-except ImportError:
-    # dotenv not installed, that's okay
-    pass
 
 # Use APP_ENV from settings (already loaded in apply_debug_utilities)
 # Only override if settings import failed
@@ -326,7 +335,6 @@ if auto_scan and st.session_state["ec2_df"].empty and st.session_state["s3_df"].
         st.session_state["ec2_df"] = ec2_df
         st.session_state["s3_df"]  = s3_df
 
-st.write("Welcome. Use the Pages sidebar to access Dashboard, EC2, S3, and AWS Setup.")
 
 
 

@@ -24,20 +24,28 @@ st.markdown("""
 ec2_df = st.session_state.get("ec2_df", pd.DataFrame())
 s3_df = st.session_state.get("s3_df", pd.DataFrame())
 
+has_data = not (ec2_df.empty and s3_df.empty)
+
 # Check if we have data
-if ec2_df.empty and s3_df.empty:
+if not has_data:
     st.info("No scan data available. Run a scan to see your cloud waste analysis.")
     
-    # Scan controls
+    # Scan controls - only show when no data
     st.markdown("### 🔍 Run AWS Scan")
     try:
         from cwt_ui.components.services.scan_service import render_scan_button, run_aws_scan
-        if render_scan_button():
-            run_aws_scan()
-            st.rerun()
+        scan_clicked = render_scan_button()
+        if scan_clicked:
+            # Only run scan if button was clicked
+            try:
+                run_aws_scan()
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ Scan failed: {e}")
     except Exception as e:
+        # UI rendering error - show fallback button
         st.button("Run Scan", disabled=True)
-        st.error(f"Scan error: {e}")
+        st.warning(f"⚠️ Unable to load scan controls: {e}")
 
 # Get summary data
 ec2_summary = compute_summary(ec2_df)
@@ -51,16 +59,23 @@ total_waste = ec2_summary["waste_count"] + s3_summary["waste_count"]
 # Render metrics cards
 render_metrics_cards(total_cost, total_savings, total_waste)
 
-# Scan controls
-st.markdown("### 🔍 Run New Scan")
-try:
-    from cwt_ui.components.services.scan_service import render_scan_button, run_aws_scan
-    if render_scan_button():
-        run_aws_scan()
-        st.rerun()
-except Exception as e:
-    st.button("Run Scan", disabled=True)
-    st.error(f"Scan error: {e}")
+# Scan controls - only show when we have data
+if has_data:
+    st.markdown("### 🔍 Run New Scan")
+    try:
+        from cwt_ui.components.services.scan_service import render_scan_button, run_aws_scan
+        scan_clicked = render_scan_button()
+        if scan_clicked:
+            # Only run scan if button was clicked
+            try:
+                run_aws_scan()
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ Scan failed: {e}")
+    except Exception as e:
+        # UI rendering error - show fallback button
+        st.button("Run Scan", disabled=True)
+        st.warning(f"⚠️ Unable to load scan controls: {e}")
 
 # Resource overview
 st.markdown("### 📊 Resource Overview")

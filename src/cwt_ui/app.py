@@ -62,8 +62,10 @@ except ImportError:
     # dotenv not installed, that's okay
     pass
 
-# Now check APP_ENV (which may have been loaded from .env)
-APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+# Use APP_ENV from settings (already loaded in apply_debug_utilities)
+# Only override if settings import failed
+if APP_ENV is None:
+    APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
 
 # Create database tables on startup (production safety)
 if APP_ENV == "production":
@@ -101,10 +103,8 @@ def try_import(modpath: str):
 cards      = try_import("cwt_ui.components.cards")
 tables     = try_import("cwt_ui.components.tables")
 formatters = try_import("cwt_ui.services.formatters")
-page_dash  = try_import("cwt_ui.pages.Dashboard")
-page_ec2   = try_import("cwt_ui.pages.EC2")  # Use original EC2 page (now enhanced)
-page_s3    = try_import("cwt_ui.pages.S3")   # Use original S3 page (now enhanced)
-page_set   = try_import("cwt_ui.pages.AWS_Setup")
+# Note: Page modules (Dashboard, EC2, S3, AWS_Setup) are auto-discovered by Streamlit
+# from the pages/ directory. Do not import them here as it causes them to render.
 
 # === Scans adapter (ENHANCED; with clear recommendations) ===
 scans = try_import("cwt_ui.services.enhanced_scans")
@@ -315,13 +315,6 @@ if st.session_state.get("aws_override_enabled"):
     debug_write(f"   - Region: {st.session_state.get('aws_default_region', 'NOT SET')}")
 else:
     debug_write("🔍 **DEBUG:** Using environment AWS credentials")
-
-with st.sidebar:
-    st.header("Navigation")
-    st.caption(f"Last scan: {st.session_state.get('last_scan_at','-')}")
-    st.divider()
-    st.caption("Use the Pages sidebar to navigate: Dashboard, EC2, S3, AWS Setup.")
-    st.caption("💡 **Tip:** Run scans from the Dashboard page.")
 
 # Optional auto-run is disabled by default to avoid blocking app startup in deployments.
 # Enable by setting env CWT_AUTO_SCAN_ON_START=true

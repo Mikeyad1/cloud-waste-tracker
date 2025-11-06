@@ -10,6 +10,18 @@ import boto3
 from botocore.exceptions import ClientError, NoCredentialsError
 
 
+def _is_debug_mode() -> bool:
+    """Check if running in debug/development mode."""
+    app_env = os.getenv("APP_ENV", "development").strip().lower()
+    return app_env != "production"
+
+
+def _debug_print(message: str):
+    """Print debug message only if in debug mode."""
+    if _is_debug_mode():
+        print(message)
+
+
 def discover_enabled_regions(
     aws_credentials: Optional[dict] = None,
     aws_auth_method: str = "user"
@@ -43,8 +55,8 @@ def discover_enabled_regions(
         # For global scanning, return ALL regions from describe_regions
         # The accessibility check was too restrictive and could skip regions with resources
         # If a region truly isn't accessible, the scan will fail gracefully for that region
-        print(f"DEBUG: Found {len(regions)} total AWS regions")
-        print(f"DEBUG: Regions list (first 10): {regions[:10]}")
+        _debug_print(f"DEBUG: Found {len(regions)} total AWS regions")
+        _debug_print(f"DEBUG: Regions list (first 10): {regions[:10]}")
         return regions
         
     except (NoCredentialsError, ClientError) as e:

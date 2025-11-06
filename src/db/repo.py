@@ -217,7 +217,9 @@ def get_last_scan() -> tuple[pd.DataFrame, pd.DataFrame, str]:
             
     except Exception as e:
         # If database is corrupted or empty, return empty data gracefully
-        print(f"🔍 DEBUG: Database error in get_last_scan: {e}")
+        import os
+        if os.getenv("APP_ENV", "development").strip().lower() != "production":
+            print(f"🔍 DEBUG: Database error in get_last_scan: {e}")
         return pd.DataFrame(), pd.DataFrame(), ""
 
 
@@ -249,5 +251,7 @@ def clear_all_scans() -> None:
             
     except Exception as e:
         logger.log_database_operation("clear_all_scans", "scans", False, e)
-        print(f"🔍 DEBUG: Error clearing scan data: {e}")
+        import os
+        if os.getenv("APP_ENV", "development").strip().lower() != "production":
+            print(f"🔍 DEBUG: Error clearing scan data: {e}")
         raise DatabaseError(f"Failed to clear scan data: {e}")

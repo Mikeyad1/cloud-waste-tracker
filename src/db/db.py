@@ -10,7 +10,8 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     # Use local SQLite database for development
     DATABASE_URL = "sqlite:///local_dev.db"
-    print("🔍 DEBUG: Using local SQLite database for development")
+    if os.getenv("APP_ENV", "development").strip().lower() != "production":
+        print("🔍 DEBUG: Using local SQLite database for development")
 
 # יצירת engine (Postgres או SQLite)
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)

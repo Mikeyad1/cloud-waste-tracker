@@ -56,7 +56,9 @@ def get_recent_scans(limit: int = 3) -> pd.DataFrame:
             
     except Exception as e:
         # If database is corrupted or empty, return empty table gracefully
-        print(f"🔍 DEBUG: Database error in get_recent_scans: {e}")
+        import os
+        if os.getenv("APP_ENV", "development").strip().lower() != "production":
+            print(f"🔍 DEBUG: Database error in get_recent_scans: {e}")
         return pd.DataFrame([{"scan_time": "—", "status": "—"}] * limit)
 
 

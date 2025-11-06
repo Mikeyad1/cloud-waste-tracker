@@ -54,15 +54,23 @@ def render_region_selector(
     
     # Region selection mode
     if allow_multi_region:
+        # Get current scan mode and validate it
+        valid_modes = ["auto", "single", "multi"]
+        current_mode = st.session_state.get("scan_mode", "auto")
+        # Ensure current_mode is valid, default to "auto" if not
+        if current_mode not in valid_modes:
+            current_mode = "auto"
+            st.session_state["scan_mode"] = "auto"
+        
         scan_mode = st.radio(
             "🔍 Scan Mode",
-            options=["auto", "single", "multi"],
+            options=valid_modes,
             format_func=lambda x: {
                 "auto": "🌍 Auto: All enabled regions",
                 "single": "📍 Single: Choose one region",
                 "multi": "📍📍 Multiple: Choose specific regions"
             }.get(x, x),
-            index=["auto", "single", "multi"].index(st.session_state.get("scan_mode", "auto")),
+            index=valid_modes.index(current_mode),
             horizontal=True,
             key="scan_mode_radio"
         )

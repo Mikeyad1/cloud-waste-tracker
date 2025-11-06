@@ -1,6 +1,6 @@
 """
 EC2 Instances Page - Global view of all EC2 instances across all regions.
-Simple single table with exactly 6 columns.
+Simple single table with exactly 7 columns.
 """
 
 import streamlit as st
@@ -30,7 +30,7 @@ if ec2_df.empty:
     if st.button("Go to AWS Setup", type="primary"):
         st.switch_page("pages/AWS_Setup.py")
 else:
-    # Prepare the simplified table with exactly 6 columns
+    # Prepare the simplified table with exactly 7 columns
     # Columns (exact order):
     # 1. Instance (instance_id)
     # 2. Region
@@ -38,6 +38,7 @@ else:
     # 4. Monthly Cost (USD)
     # 5. State (running/stopped/...)
     # 6. Utilization (CPU %)
+    # 7. Idle Score (%)
     
     # Ensure we have the required columns
     result_df = pd.DataFrame()
@@ -96,6 +97,25 @@ else:
         result_df['Utilization (CPU %)'] = ec2_df['Utilization (CPU %)']
     else:
         result_df['Utilization (CPU %)'] = "—"
+    
+    # Idle Score (%)
+    def format_idle_score(cpu_val):
+        if pd.isna(cpu_val) or cpu_val < 0:
+            return "—"
+        idle_score = round((1 - (cpu_val / 100)) * 100, 1)
+        # Determine color indicator
+        if idle_score < 50:
+            color_indicator = "🟢"
+        elif idle_score < 80:
+            color_indicator = "🟠"
+        else:
+            color_indicator = "🔴"
+        return f"{idle_score}% {color_indicator}"
+    
+    if 'avg_cpu_7d' in ec2_df.columns:
+        result_df['Idle Score (%)'] = ec2_df['avg_cpu_7d'].apply(format_idle_score)
+    else:
+        result_df['Idle Score (%)'] = "—"
     
     # Format Monthly Cost as currency
     result_df['Monthly Cost (USD)'] = result_df['Monthly Cost (USD)'].apply(lambda x: f"${float(x):,.2f}" if pd.notna(x) else "$0.00")

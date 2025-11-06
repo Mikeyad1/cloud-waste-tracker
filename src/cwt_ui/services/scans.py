@@ -71,7 +71,8 @@ def run_all_scans(
                             from core.services.region_service import discover_enabled_regions
                             # Discover regions using temporary role credentials (in env now)
                             regions = discover_enabled_regions(None, "user")  # Credentials are now in env
-                            print(f"DEBUG: Discovered {len(regions)} regions: {regions}")
+                            if os.getenv("APP_ENV", "development").strip().lower() != "production":
+                                print(f"DEBUG: Discovered {len(regions)} regions: {regions}")
                             if not regions:
                                 print("WARNING: No regions discovered, falling back to common regions")
                                 from core.services.region_service import _common_regions
@@ -101,7 +102,8 @@ def run_all_scans(
         try:
             from core.services.region_service import discover_enabled_regions
             regions = discover_enabled_regions(aws_credentials, aws_auth_method)
-            print(f"DEBUG: Discovered {len(regions)} regions: {regions}")
+            if os.getenv("APP_ENV", "development").strip().lower() != "production":
+                print(f"DEBUG: Discovered {len(regions)} regions: {regions}")
             if not regions:
                 from core.services.region_service import _common_regions
                 regions = _common_regions()
@@ -131,17 +133,20 @@ def _scan_multiple_regions(
     all_ec2_results = []
     all_s3_results = []
     
-    print(f"DEBUG: Starting scan of {len(regions)} regions: {regions}")
+    if os.getenv("APP_ENV", "development").strip().lower() != "production":
+        print(f"DEBUG: Starting scan of {len(regions)} regions: {regions}")
     
     for region in regions:
         try:
-            print(f"DEBUG: Scanning region {region}...")
+            if os.getenv("APP_ENV", "development").strip().lower() != "production":
+                print(f"DEBUG: Scanning region {region}...")
             ec2_df = scan_ec2(region=region)
             s3_df = scan_s3(region=region)
             
             ec2_count = len(ec2_df) if not ec2_df.empty else 0
             s3_count = len(s3_df) if not s3_df.empty else 0
-            print(f"DEBUG: Region {region}: Found {ec2_count} EC2 instances, {s3_count} S3 buckets")
+            if os.getenv("APP_ENV", "development").strip().lower() != "production":
+                print(f"DEBUG: Region {region}: Found {ec2_count} EC2 instances, {s3_count} S3 buckets")
             
             if not ec2_df.empty:
                 all_ec2_results.append(ec2_df)
@@ -158,7 +163,8 @@ def _scan_multiple_regions(
     final_ec2 = pd.concat(all_ec2_results, ignore_index=True) if all_ec2_results else pd.DataFrame()
     final_s3 = pd.concat(all_s3_results, ignore_index=True) if all_s3_results else pd.DataFrame()
     
-    print(f"DEBUG: Total results: {len(final_ec2)} EC2 instances, {len(final_s3)} S3 buckets")
+    if os.getenv("APP_ENV", "development").strip().lower() != "production":
+        print(f"DEBUG: Total results: {len(final_ec2)} EC2 instances, {len(final_s3)} S3 buckets")
     
     return final_ec2, final_s3
 
@@ -448,10 +454,11 @@ def _assume_role(credentials: Mapping[str, str]) -> Optional[dict[str, str]]:
             print("ERROR: No role ARN provided")
             return None
             
-        print(f"DEBUG: Attempting to assume role {role_arn}")
-        print(f"DEBUG: External ID: {'SET' if external_id else 'NOT SET'}")
-        print(f"DEBUG: Session Name: {session_name}")
-        print(f"DEBUG: Region: {region}")
+        if os.getenv("APP_ENV", "development").strip().lower() != "production":
+            print(f"DEBUG: Attempting to assume role {role_arn}")
+            print(f"DEBUG: External ID: {'SET' if external_id else 'NOT SET'}")
+            print(f"DEBUG: Session Name: {session_name}")
+            print(f"DEBUG: Region: {region}")
             
         # Create STS client with base credentials
         # Use credentials from dict if provided, otherwise let boto3 use environment variables
@@ -480,9 +487,11 @@ def _assume_role(credentials: Mapping[str, str]) -> Optional[dict[str, str]]:
         # Test base credentials first
         try:
             identity = sts_client.get_caller_identity()
-            print(f"DEBUG: Base credentials work. Caller: {identity.get('Arn', 'Unknown')}")
+            if os.getenv("APP_ENV", "development").strip().lower() != "production":
+                print(f"DEBUG: Base credentials work. Caller: {identity.get('Arn', 'Unknown')}")
         except Exception as e:
-            print(f"DEBUG: Base credentials failed: {e}")
+            if os.getenv("APP_ENV", "development").strip().lower() != "production":
+                print(f"DEBUG: Base credentials failed: {e}")
             return None
         
         # Prepare assume role parameters
@@ -498,8 +507,9 @@ def _assume_role(credentials: Mapping[str, str]) -> Optional[dict[str, str]]:
         response = sts_client.assume_role(**assume_role_kwargs)
         
         creds = response['Credentials']
-        print(f"DEBUG: Successfully assumed role {role_arn}")
-        print(f"DEBUG: Temporary credentials expire at: {creds['Expiration']}")
+        if os.getenv("APP_ENV", "development").strip().lower() != "production":
+            print(f"DEBUG: Successfully assumed role {role_arn}")
+            print(f"DEBUG: Temporary credentials expire at: {creds['Expiration']}")
         return {
             'AWS_ACCESS_KEY_ID': creds['AccessKeyId'],
             'AWS_SECRET_ACCESS_KEY': creds['SecretAccessKey'],

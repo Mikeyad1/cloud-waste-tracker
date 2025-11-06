@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from typing import List
 import importlib
 import pandas as pd
 import streamlit as st
@@ -39,31 +40,16 @@ except ImportError:
     # dotenv not installed, that's okay
     pass
 
-# Apply layout fixes inline
-def apply_debug_utilities():
-    """Apply debug utilities if in development mode."""
-    # Import settings from new config system
-    try:
-        from config.factory import settings
-        DEBUG_MODE = settings.DEBUG
-        APP_ENV = settings.APP_ENV
-    except ImportError:
-        # Fallback to old method if config not available
-        import os
-        APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
-        DEBUG_MODE = APP_ENV == "development"
-    
-    def debug_write(message: str):
-        """Debug messages disabled - no-op function"""
-        pass  # Debug messages removed from UI
-    
-    return debug_write, APP_ENV
+# Debug utility (disabled)
+def debug_write(message: str):
+    """Debug messages disabled - no-op function"""
+    pass
 
-debug_write, APP_ENV = apply_debug_utilities()
-
-# Use APP_ENV from settings (already loaded in apply_debug_utilities)
-# Only override if settings import failed
-if APP_ENV is None:
+# Get APP_ENV from settings
+try:
+    from config.factory import settings
+    APP_ENV = settings.APP_ENV
+except ImportError:
     APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
 
 # Create database tables on startup (production safety)
@@ -75,9 +61,6 @@ if APP_ENV == "production":
         print("✅ Database tables ensured on startup")
     except Exception as e:
         print(f"⚠️ Database table creation failed: {e}")
-
-# Debug: Show environment detection (temporary)
-debug_write(f"🔍 **ENV DEBUG:** APP_ENV='{APP_ENV}'")
 
 # === Locate repo root & src ===
 APP_DIR = Path(__file__).resolve().parent
@@ -98,56 +81,17 @@ def try_import(modpath: str):
     except Exception:
         return None
 
-# === UI modules (optional) ===
-cards      = try_import("cwt_ui.components.cards")
-tables     = try_import("cwt_ui.components.tables")
-formatters = try_import("cwt_ui.services.formatters")
-# Note: Page modules (Dashboard, EC2, S3, AWS_Setup) are auto-discovered by Streamlit
-# from the pages/ directory. Do not import them here as it causes them to render.
-
 # === Scans adapter (ENHANCED; with clear recommendations) ===
 scans = try_import("cwt_ui.services.enhanced_scans")
 if scans is None:
     # Fallback to basic scans
     scans = try_import("cwt_ui.services.scans")
-
-# === UI fallbacks ===
-def _fb_currency(x):
-    try:
-        return f"${float(x):,.2f}"
-    except Exception:
-        return str(x)
-
-if formatters is None or not hasattr(formatters, "currency"):
-    class _Fmt:
-        @staticmethod
-        def currency(x): return _fb_currency(x)
-        @staticmethod
-        def percent(x):
-            try: return f"{float(x):.1f}%"
-            except Exception: return str(x)
-        @staticmethod
-        def human_gb(x, d: int = 2):
-            try: return f"{float(x):.{d}f} GB"
-            except Exception: return str(x)
-    formatters = _Fmt()
-
-if cards is None or not hasattr(cards, "metric"):
-    class _Cards:
-        @staticmethod
-        def metric(label, value, help_text=None):
-            st.metric(label, value, help=help_text)
-    cards = _Cards()
-
-if tables is None or not hasattr(tables, "render"):
-    class _Tables:
-        @staticmethod
-        def render(df: pd.DataFrame, **_):
-            st.dataframe(df, use_container_width=True)
-    tables = _Tables()
+# Note: Page modules (Dashboard, EC2, S3, AWS_Setup) are auto-discovered by Streamlit
+# from the pages/ directory. Do not import them here as it causes them to render.
 
 # === Helpers ===
 def add_status(df: pd.DataFrame) -> pd.DataFrame:
+    """Add status column to dataframe based on recommendation."""
     if df is None or df.empty:
         return pd.DataFrame()
     out = df.copy()
@@ -156,20 +100,6 @@ def add_status(df: pd.DataFrame) -> pd.DataFrame:
             lambda x: "🟢 OK" if x == "OK" else "🔴 Action"
         )
     return out
-
-def compute_summary(ec2_df: pd.DataFrame, s3_df: pd.DataFrame):
-    idle = 0; waste = 0.0; cold = 0.0
-    if ec2_df is not None and not ec2_df.empty:
-        if "recommendation" in ec2_df.columns:
-            m = ~ec2_df["recommendation"].astype(str).str.upper().eq("OK")
-        else:
-            m = ec2_df.index == ec2_df.index  # treat all as actionable if missing column
-        idle = int(m.sum())
-        if "monthly_cost_usd" in ec2_df.columns:
-            waste = float(ec2_df.loc[m, "monthly_cost_usd"].fillna(0).sum())
-    if s3_df is not None and not s3_df.empty and "standard_cold_gb" in s3_df.columns:
-        cold = float(s3_df["standard_cold_gb"].fillna(0).sum())
-    return idle, waste, cold
 
 def run_live_scans(region: str | List[str] | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
     """

@@ -146,15 +146,3 @@ def render_scan_button(show_region_selector: bool = True) -> bool:
             st.session_state["scan_regions"] = None  # Auto-discover
     
     return st.button("🔄 Run AWS Scan", type="primary", use_container_width=True)
-
-
-def render_scan_status() -> None:
-    """Render the current scan status."""
-    last_scan = st.session_state.get("last_scan_at", "Never")
-    ec2_count = len(st.session_state.get("ec2_df", pd.DataFrame()))
-    s3_count = len(st.session_state.get("s3_df", pd.DataFrame()))
-    
-    if last_scan != "Never":
-        st.success(f"✅ Last scan: {last_scan} | Found {ec2_count} EC2 instances, {s3_count} S3 buckets")
-    else:
-        st.info("ℹ️ No scans run yet. Click 'Run AWS Scan' to analyze your resources.")

@@ -475,7 +475,6 @@ def _assume_role(credentials: Mapping[str, str]) -> Optional[dict[str, str]]:
             )
         else:
             # Force boto3 to use only environment variables, not local files
-            import os
             sts_client = boto3.client(
                 'sts',
                 aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'),

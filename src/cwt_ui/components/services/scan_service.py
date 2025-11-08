@@ -91,11 +91,16 @@ def run_aws_scan(region: Optional[str] | List[str] | None = None) -> Tuple[pd.Da
             st.session_state["s3_df"] = s3_df
             st.session_state["last_scan_at"] = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
 
-            sp_df, sp_summary = fetch_savings_plan_utilization(
+            sp_df, sp_summary, sp_util_trend, sp_coverage_trend = fetch_savings_plan_utilization(
                 aws_credentials if aws_credentials else None
             )
-            st.session_state["savings_plans_df"] = sp_df
-            st.session_state["savings_plans_summary"] = sp_summary
+            st.session_state["SP_DF"] = sp_df
+            st.session_state["SP_SUMMARY"] = sp_summary
+            st.session_state["SP_UTIL_TREND"] = sp_util_trend
+            st.session_state["SP_COVERAGE_TREND"] = sp_coverage_trend
+            # Clear legacy keys if present
+            st.session_state.pop("savings_plans_df", None)
+            st.session_state.pop("savings_plans_summary", None)
             
             # Show success message with region info
             if isinstance(region, list):

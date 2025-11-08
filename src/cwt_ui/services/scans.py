@@ -23,7 +23,12 @@ except Exception:
     scan_savings_plans = None  # type: ignore
 
 
-_LAST_SAVINGS_PLAN_RESULTS: tuple[pd.DataFrame, dict] = (pd.DataFrame(), {})
+_LAST_SAVINGS_PLAN_RESULTS: tuple[pd.DataFrame, dict, pd.DataFrame, pd.DataFrame] = (
+    pd.DataFrame(),
+    {},
+    pd.DataFrame(),
+    pd.DataFrame(),
+)
 
 # ------------------------------
 # Public API (used by app.py)
@@ -180,14 +185,19 @@ def _update_savings_plans_cache() -> None:
     """Refresh cached Savings Plans utilization results."""
     global _LAST_SAVINGS_PLAN_RESULTS
     if scan_savings_plans is None:
-        _LAST_SAVINGS_PLAN_RESULTS = (pd.DataFrame(), {})
+        _LAST_SAVINGS_PLAN_RESULTS = (pd.DataFrame(), {}, pd.DataFrame(), pd.DataFrame())
         return
     
     try:
         _LAST_SAVINGS_PLAN_RESULTS = scan_savings_plans()
     except Exception as exc:
         print(f"⚠️  Savings Plans scan failed: {exc}")
-        _LAST_SAVINGS_PLAN_RESULTS = (pd.DataFrame(), {"error": str(exc)})
+        _LAST_SAVINGS_PLAN_RESULTS = (
+            pd.DataFrame(),
+            {"error": str(exc)},
+            pd.DataFrame(),
+            pd.DataFrame(),
+        )
 
 
 
@@ -566,19 +576,19 @@ def _assume_role(credentials: Mapping[str, str]) -> Optional[dict[str, str]]:
 
 def fetch_savings_plan_utilization(
     aws_credentials: Optional[Mapping[str, str]] = None,
-) -> tuple[pd.DataFrame, dict]:
+) -> tuple[pd.DataFrame, dict, pd.DataFrame, pd.DataFrame]:
     """
     Retrieve Savings Plans utilization results.
 
     Returns cached results from the most recent scan when available. If cache is empty
     and credentials are provided, performs a fresh scan using those credentials.
     """
-    cached_df, cached_summary = _LAST_SAVINGS_PLAN_RESULTS
+    cached_df, cached_summary, cached_util_trend, cached_coverage_trend = _LAST_SAVINGS_PLAN_RESULTS
     if not cached_df.empty or cached_summary:
-        return cached_df, cached_summary
+        return cached_df, cached_summary, cached_util_trend, cached_coverage_trend
 
     if scan_savings_plans is None:
-        return pd.DataFrame(), {}
+        return pd.DataFrame(), {}, pd.DataFrame(), pd.DataFrame()
 
     if aws_credentials:
         try:
@@ -586,13 +596,18 @@ def fetch_savings_plan_utilization(
                 return scan_savings_plans()
         except Exception as exc:
             print(f"⚠️  Savings Plans scan failed: {exc}")
-            return pd.DataFrame(), {"error": str(exc)}
+            return (
+                pd.DataFrame(),
+                {"error": str(exc)},
+                pd.DataFrame(),
+                pd.DataFrame(),
+            )
 
     try:
         return scan_savings_plans()
     except Exception as exc:
         print(f"⚠️  Savings Plans scan failed: {exc}")
-        return pd.DataFrame(), {"error": str(exc)}
+        return pd.DataFrame(), {"error": str(exc)}, pd.DataFrame(), pd.DataFrame()
 
 
 # ------------------------------

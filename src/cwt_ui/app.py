@@ -9,6 +9,8 @@ import importlib
 import pandas as pd
 import streamlit as st
 
+from cwt_ui.components.ui.header import render_page_header
+
 # === Streamlit config ===
 st.set_page_config(
     page_title="Cloud Waste Tracker", 
@@ -20,17 +22,6 @@ st.set_page_config(
 # Ensure sidebar is always expanded and content aligns properly
 if "sidebar_state" not in st.session_state:
     st.session_state.sidebar_state = "expanded"
-
-# Simple layout fix - only adjust padding, don't override margins
-st.markdown("""
-<style>
-    .main .block-container {
-        padding-left: 1rem;
-        padding-top: 2rem;
-        padding-bottom: 2rem;
-    }
-</style>
-""", unsafe_allow_html=True)
 
 # Load .env file first (before checking APP_ENV)
 try:
@@ -207,7 +198,11 @@ def run_live_scans(region: str | List[str] | None = None) -> tuple[pd.DataFrame,
         return pd.DataFrame(), pd.DataFrame()
 
 # === App ===
-st.title("Cloud Waste Tracker 💸")
+render_page_header(
+    title="Cloud Waste Tracker",
+    subtitle="Live dashboards, insights, and remediation tools for AWS cost optimization.",
+    icon="💸",
+)
 
 # DEBUG: Page load indicator
 debug_write("🔍 **DEBUG:** Main app.py loaded")

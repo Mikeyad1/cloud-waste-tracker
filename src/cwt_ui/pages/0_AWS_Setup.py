@@ -8,6 +8,7 @@ import os
 from cwt_ui.components.settings.settings_config import SettingsManager
 from cwt_ui.components.settings.settings_aws import render_clean_credentials_form
 from cwt_ui.components.services.scan_service import run_aws_scan
+from cwt_ui.components.ui.header import render_page_header
 
 
 def debug_write(message: str):
@@ -261,10 +262,11 @@ def render() -> None:
     # Apply clean CSS styling
     _render_clean_css()
     
-    # Simple, clean header
-    st.markdown("## 🔐 AWS Setup")
-    st.markdown("Enter the IAM Role ARN to assume using your environment credentials.")
-    st.markdown("---")
+    render_page_header(
+        title="AWS Setup",
+        subtitle="Configure IAM access and choose your preferred scan scope.",
+        icon="🔐",
+    )
     
     # Initialize session state
     settings_manager = SettingsManager()
@@ -434,3 +436,4 @@ def _maybe_render_self():
 
 
 _maybe_render_self()
+

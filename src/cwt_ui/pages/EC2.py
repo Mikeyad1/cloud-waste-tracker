@@ -122,13 +122,51 @@ else:
     
     # Display the table - single global table, no tabs, no filters
     st.markdown("### 📊 EC2 Instances")
-    st.dataframe(
-        result_df,
-        use_container_width=True,
-        hide_index=True
-    )
+    st.dataframe(result_df, width="stretch", hide_index=True)
     
     # Show summary
     total_instances = len(result_df)
     regions_count = result_df['Region'].nunique()
     st.caption(f"Showing {total_instances} instances across {regions_count} region(s)")
+
+    st.markdown("---")
+    st.markdown("### Savings Plan Utilization Dashboard")
+
+    savings_df = st.session_state.get("savings_plans_df", pd.DataFrame())
+    savings_summary = st.session_state.get("savings_plans_summary", {})
+
+    if savings_summary.get("error"):
+        st.warning(f"⚠️ Unable to load Savings Plans data: {savings_summary['error']}")
+    elif savings_summary.get("warning"):
+        st.info(savings_summary["warning"])
+
+    if savings_df.empty:
+        st.info("📦 No Savings Plans detected for this account.")
+    else:
+        overall_utilization = float(savings_summary.get("overall_utilization_pct", 0.0))
+        total_commitment = savings_summary.get("total_commitment_per_hour", 0.0)
+        total_used = savings_summary.get("total_used_per_hour", 0.0)
+
+        progress_value = max(0.0, min(overall_utilization / 100.0, 1.0))
+        st.progress(progress_value, text=f"Current utilization: {overall_utilization:.1f}%")
+        st.caption(
+            f"Using ${total_used:,.2f}/hr out of ${total_commitment:,.2f}/hr committed."
+            if total_commitment
+            else "No active commitments detected."
+        )
+
+        display_df = savings_df.copy()
+        display_df["Commitment ($/hr)"] = display_df["Commitment ($/hr)"].apply(
+            lambda x: f"${x:,.2f}"
+        )
+        display_df["Actual Usage ($/hr)"] = display_df["Actual Usage ($/hr)"].apply(
+            lambda x: f"${x:,.2f}"
+        )
+        display_df["Utilization (%)"] = display_df["Utilization (%)"].map(
+            lambda x: f"{x:.2f}%"
+        )
+        display_df["Forecast Utilization (%)"] = display_df["Forecast Utilization (%)"].map(
+            lambda x: f"{x:.2f}%"
+        )
+
+        st.dataframe(display_df, width="stretch", hide_index=True)

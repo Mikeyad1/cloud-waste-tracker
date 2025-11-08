@@ -17,6 +17,13 @@ try:
 except Exception:
     _s3_scanner = None  # type: ignore
 
+try:
+    from scanners.savings_plans_scanner import scan_savings_plans  # type: ignore
+except Exception:
+    scan_savings_plans = None  # type: ignore
+
+
+_LAST_SAVINGS_PLAN_RESULTS: tuple[pd.DataFrame, dict] = (pd.DataFrame(), {})
 
 # ------------------------------
 # Public API (used by app.py)
@@ -166,7 +173,22 @@ def _scan_multiple_regions(
     if os.getenv("APP_ENV", "development").strip().lower() != "production":
         print(f"DEBUG: Total results: {len(final_ec2)} EC2 instances, {len(final_s3)} S3 buckets")
     
+    _update_savings_plans_cache()
+    
     return final_ec2, final_s3
+def _update_savings_plans_cache() -> None:
+    """Refresh cached Savings Plans utilization results."""
+    global _LAST_SAVINGS_PLAN_RESULTS
+    if scan_savings_plans is None:
+        _LAST_SAVINGS_PLAN_RESULTS = (pd.DataFrame(), {})
+        return
+    
+    try:
+        _LAST_SAVINGS_PLAN_RESULTS = scan_savings_plans()
+    except Exception as exc:
+        print(f"⚠️  Savings Plans scan failed: {exc}")
+        _LAST_SAVINGS_PLAN_RESULTS = (pd.DataFrame(), {"error": str(exc)})
+
 
 
 def scan_ec2(region: Optional[str] = None) -> pd.DataFrame:
@@ -535,6 +557,42 @@ def _assume_role(credentials: Mapping[str, str]) -> Optional[dict[str, str]]:
     except Exception as e:
         print(f"Unexpected error during role assumption: {e}")
         return None
+
+
+# ------------------------------
+# Savings Plans helpers
+# ------------------------------
+
+
+def fetch_savings_plan_utilization(
+    aws_credentials: Optional[Mapping[str, str]] = None,
+) -> tuple[pd.DataFrame, dict]:
+    """
+    Retrieve Savings Plans utilization results.
+
+    Returns cached results from the most recent scan when available. If cache is empty
+    and credentials are provided, performs a fresh scan using those credentials.
+    """
+    cached_df, cached_summary = _LAST_SAVINGS_PLAN_RESULTS
+    if not cached_df.empty or cached_summary:
+        return cached_df, cached_summary
+
+    if scan_savings_plans is None:
+        return pd.DataFrame(), {}
+
+    if aws_credentials:
+        try:
+            with _temporary_env(aws_credentials):
+                return scan_savings_plans()
+        except Exception as exc:
+            print(f"⚠️  Savings Plans scan failed: {exc}")
+            return pd.DataFrame(), {"error": str(exc)}
+
+    try:
+        return scan_savings_plans()
+    except Exception as exc:
+        print(f"⚠️  Savings Plans scan failed: {exc}")
+        return pd.DataFrame(), {"error": str(exc)}
 
 
 # ------------------------------

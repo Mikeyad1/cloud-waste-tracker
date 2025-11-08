@@ -23,7 +23,7 @@ def _render_scan_mode_toggle() -> str:
     """
     # Initialize session state for scan mode
     if "scan_mode" not in st.session_state:
-        st.session_state["scan_mode"] = "global"
+        st.session_state["scan_mode"] = "regional"
     
     # Custom CSS for circle/tab toggle
     st.markdown("""
@@ -72,25 +72,25 @@ def _render_scan_mode_toggle() -> str:
     col1, col2 = st.columns([1, 1])
     
     with col1:
-        global_active = st.session_state["scan_mode"] == "global"
-        if st.button(
-            "🌍 Global Scan",
-            key="global_scan_toggle",
-            type="primary" if global_active else "secondary",
-            use_container_width=True
-        ):
-            st.session_state["scan_mode"] = "global"
-            st.rerun()
-    
-    with col2:
         regional_active = st.session_state["scan_mode"] == "regional"
         if st.button(
             "📍 Regional Scan",
             key="regional_scan_toggle",
             type="primary" if regional_active else "secondary",
-            use_container_width=True
+            width="stretch"
         ):
             st.session_state["scan_mode"] = "regional"
+            st.rerun()
+    
+    with col2:
+        global_active = st.session_state["scan_mode"] == "global"
+        if st.button(
+            "🌍 Global Scan",
+            key="global_scan_toggle",
+            type="primary" if global_active else "secondary",
+            width="stretch"
+        ):
+            st.session_state["scan_mode"] = "global"
             st.rerun()
     
     return st.session_state["scan_mode"]

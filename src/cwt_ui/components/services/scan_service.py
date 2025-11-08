@@ -8,6 +8,8 @@ import pandas as pd
 import os
 from typing import Tuple, Optional, Dict, Any, List
 
+from cwt_ui.services.scans import fetch_savings_plan_utilization
+
 
 def run_aws_scan(region: Optional[str] | List[str] | None = None) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
@@ -88,6 +90,12 @@ def run_aws_scan(region: Optional[str] | List[str] | None = None) -> Tuple[pd.Da
             st.session_state["ec2_df"] = ec2_df
             st.session_state["s3_df"] = s3_df
             st.session_state["last_scan_at"] = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            sp_df, sp_summary = fetch_savings_plan_utilization(
+                aws_credentials if aws_credentials else None
+            )
+            st.session_state["savings_plans_df"] = sp_df
+            st.session_state["savings_plans_summary"] = sp_summary
             
             # Show success message with region info
             if isinstance(region, list):
@@ -145,4 +153,4 @@ def render_scan_button(show_region_selector: bool = True) -> bool:
         else:
             st.session_state["scan_regions"] = None  # Auto-discover
     
-    return st.button("🔄 Run AWS Scan", type="primary", use_container_width=True)
+    return st.button("🔄 Run AWS Scan", type="primary", width="stretch")

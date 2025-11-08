@@ -6,6 +6,18 @@ import sys
 from pathlib import Path
 from typing import List
 import importlib
+
+# Ensure src/ is on sys.path before importing internal packages
+APP_DIR = Path(__file__).resolve().parent
+REPO_ROOT = APP_DIR
+for p in [APP_DIR, *APP_DIR.parents]:
+    if (p / "src").exists():
+        REPO_ROOT = p
+        break
+SRC_DIR = REPO_ROOT / "src"
+if str(SRC_DIR) not in sys.path:
+    sys.path.insert(0, str(SRC_DIR))
+
 import pandas as pd
 import streamlit as st
 
@@ -52,18 +64,6 @@ if APP_ENV == "production":
         print("✅ Database tables ensured on startup")
     except Exception as e:
         print(f"⚠️ Database table creation failed: {e}")
-
-# === Locate repo root & src ===
-APP_DIR = Path(__file__).resolve().parent
-REPO_ROOT = APP_DIR
-for p in [APP_DIR, *APP_DIR.parents]:
-    if (p / "src").exists():
-        REPO_ROOT = p
-        break
-
-SRC_DIR = REPO_ROOT / "src"
-if str(SRC_DIR) not in sys.path:
-    sys.path.insert(0, str(SRC_DIR))
 
 # === Safe import helper ===
 def try_import(modpath: str):

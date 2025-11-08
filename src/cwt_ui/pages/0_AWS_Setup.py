@@ -3,8 +3,19 @@ AWS Setup page - Configure credentials and scan AWS resources.
 Clean, simple guided setup flow for entering IAM credentials and testing connection.
 """
 
-import streamlit as st
 import os
+import sys
+from pathlib import Path
+
+CURRENT_DIR = Path(__file__).resolve().parent
+for candidate in [CURRENT_DIR, *CURRENT_DIR.parents]:
+    candidate_src = candidate / "src"
+    if candidate_src.exists():
+        if str(candidate_src) not in sys.path:
+            sys.path.insert(0, str(candidate_src))
+        break
+
+import streamlit as st
 from cwt_ui.components.settings.settings_config import SettingsManager
 from cwt_ui.components.settings.settings_aws import render_clean_credentials_form
 from cwt_ui.components.services.scan_service import run_aws_scan

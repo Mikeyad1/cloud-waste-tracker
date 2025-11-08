@@ -1,3 +1,14 @@
+import sys
+from pathlib import Path
+
+CURRENT_DIR = Path(__file__).resolve().parent
+for candidate in [CURRENT_DIR, *CURRENT_DIR.parents]:
+    candidate_src = candidate / "src"
+    if candidate_src.exists():
+        if str(candidate_src) not in sys.path:
+            sys.path.insert(0, str(candidate_src))
+        break
+
 import streamlit as st
 import pandas as pd
 from cwt_ui.utils.metrics import compute_summary, render_metrics_cards, debug_write

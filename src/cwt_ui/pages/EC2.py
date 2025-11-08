@@ -1,8 +1,18 @@
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
 from datetime import date, timedelta
 from typing import Optional
+
+CURRENT_DIR = Path(__file__).resolve().parent
+for candidate in [CURRENT_DIR, *CURRENT_DIR.parents]:
+    candidate_src = candidate / "src"
+    if candidate_src.exists():
+        if str(candidate_src) not in sys.path:
+            sys.path.insert(0, str(candidate_src))
+        break
 
 import numpy as np
 import pandas as pd

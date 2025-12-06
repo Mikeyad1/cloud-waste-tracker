@@ -102,6 +102,30 @@ def run_aws_scan(region: Optional[str] | List[str] | None = None) -> Tuple[pd.Da
             st.session_state.pop("savings_plans_df", None)
             st.session_state.pop("savings_plans_summary", None)
             
+            # Compute EC2 vs SP alignment if both EC2 and SP data exist
+            if not ec2_df.empty and not sp_df.empty:
+                try:
+                    from scanners.ec2_sp_alignment_scanner import scan_ec2_sp_alignment
+                    alignment_df = scan_ec2_sp_alignment(
+                        ec2_df, sp_df, aws_credentials if aws_credentials else None
+                    )
+                    st.session_state["EC2_SP_ALIGNMENT_DF"] = alignment_df
+                except Exception as e:
+                    # Log error but don't fail the scan
+                    print(f"Warning: Failed to compute EC2-SP alignment: {e}")
+                    st.session_state.pop("EC2_SP_ALIGNMENT_DF", None)
+            elif not ec2_df.empty:
+                # If we have EC2 but no SP, still create alignment (all instances uncovered)
+                try:
+                    from scanners.ec2_sp_alignment_scanner import scan_ec2_sp_alignment
+                    alignment_df = scan_ec2_sp_alignment(
+                        ec2_df, pd.DataFrame(), aws_credentials if aws_credentials else None
+                    )
+                    st.session_state["EC2_SP_ALIGNMENT_DF"] = alignment_df
+                except Exception as e:
+                    print(f"Warning: Failed to compute EC2-SP alignment: {e}")
+                    st.session_state.pop("EC2_SP_ALIGNMENT_DF", None)
+            
             # Show success message with region info
             if isinstance(region, list):
                 st.success(f"✅ Scan complete! Found resources in {len(region)} regions: {', '.join(region)}")

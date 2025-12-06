@@ -2,6 +2,7 @@
 """
 Simple database table creation script for Render deployment
 Usage: python create_tables.py
+Creates database tables locally (your computer)
 """
 
 import sys

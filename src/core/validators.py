@@ -15,7 +15,6 @@ class InputValidator:
     
     # AWS resource ID patterns
     EC2_INSTANCE_PATTERN = re.compile(r'^i-[0-9a-f]{8,17}$')
-    S3_BUCKET_PATTERN = re.compile(r'^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$')
     
     @staticmethod
     def validate_aws_region(region: str) -> str:
@@ -54,30 +53,6 @@ class InputValidator:
             )
         
         return instance_id
-    
-    @staticmethod
-    def validate_s3_bucket_name(bucket_name: str) -> str:
-        """Validate S3 bucket name format"""
-        if not bucket_name:
-            raise ValidationError("S3 bucket name cannot be empty")
-        
-        if not isinstance(bucket_name, str):
-            raise ValidationError("S3 bucket name must be a string")
-        
-        bucket_name = bucket_name.strip().lower()
-        
-        if len(bucket_name) < 3 or len(bucket_name) > 63:
-            raise ValidationError(
-                f"S3 bucket name must be 3-63 characters long: {bucket_name}"
-            )
-        
-        if not InputValidator.S3_BUCKET_PATTERN.match(bucket_name):
-            raise ValidationError(
-                f"Invalid S3 bucket name format: {bucket_name}. "
-                "Bucket names can contain lowercase letters, numbers, dots, and hyphens"
-            )
-        
-        return bucket_name
     
     @staticmethod
     def validate_positive_number(value: Any, field_name: str) -> float:
@@ -119,9 +94,9 @@ class InputValidator:
         # Validate scan type
         if 'scan_type' in params:
             scan_type = params['scan_type']
-            if scan_type not in ['ec2', 's3', 'full']:
+            if scan_type not in ['ec2']:
                 raise ValidationError(
-                    f"Invalid scan type: {scan_type}. Must be 'ec2', 's3', or 'full'"
+                    f"Invalid scan type: {scan_type}. Must be 'ec2'"
                 )
             validated['scan_type'] = scan_type
         

@@ -77,7 +77,7 @@ scans = try_import("cwt_ui.services.enhanced_scans")
 if scans is None:
     # Fallback to basic scans
     scans = try_import("cwt_ui.services.scans")
-# Note: Page modules (Dashboard, EC2, S3, AWS_Setup) are auto-discovered by Streamlit
+# Note: Page modules (Dashboard, EC2, AWS_Setup) are auto-discovered by Streamlit
 # from the pages/ directory. Do not import them here as it causes them to render.
 
 # === Helpers ===
@@ -92,7 +92,7 @@ def add_status(df: pd.DataFrame) -> pd.DataFrame:
         )
     return out
 
-def run_live_scans(region: str | List[str] | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
+def run_live_scans(region: str | List[str] | None = None) -> pd.DataFrame:
     """
     Run AWS scans across one or more regions.
     
@@ -103,7 +103,7 @@ def run_live_scans(region: str | List[str] | None = None) -> tuple[pd.DataFrame,
             - List of regions (e.g., ["us-east-1", "eu-west-1"])
     
     Returns:
-        Tuple of (EC2 DataFrame, S3 DataFrame) with results from all scanned regions
+        EC2 DataFrame with results from all scanned regions
     """
     debug_write("🔍 **DEBUG:** run_live_scans() called")
     
@@ -122,7 +122,7 @@ def run_live_scans(region: str | List[str] | None = None) -> tuple[pd.DataFrame,
     
     if scans is None or not hasattr(scans, "run_all_scans"):
         st.error("Scans adapter not found: cwt_ui.services.scans.run_all_scans")
-        return pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame()
     
     try:
         # Prepare optional session-scoped AWS credential overrides
@@ -171,7 +171,7 @@ def run_live_scans(region: str | List[str] | None = None) -> tuple[pd.DataFrame,
         debug_write("🔍 **DEBUG:** Calling scans.run_all_scans()...")
         auth_method = st.session_state.get("aws_auth_method", "role")
         debug_write(f"   - Auth method: {auth_method}")
-        ec2_df, s3_df = scans.run_all_scans(region=region, aws_credentials=creds, aws_auth_method=auth_method)  # type: ignore
+        ec2_df = scans.run_all_scans(region=region, aws_credentials=creds, aws_auth_method=auth_method)  # type: ignore
         debug_write("🔍 **DEBUG:** scans.run_all_scans() completed")
         # Stamp scan time
         import datetime as _dt
@@ -186,16 +186,15 @@ def run_live_scans(region: str | List[str] | None = None) -> tuple[pd.DataFrame,
             out["scanned_at"] = scanned_at
             return out
         
-        debug_write("🔍 **DEBUG:** Adding status and timestamp to dataframes...")
+        debug_write("🔍 **DEBUG:** Adding status and timestamp to dataframe...")
         result_ec2 = add_status(_stamp(ec2_df))
-        result_s3 = add_status(_stamp(s3_df))
-        debug_write(f"🔍 **DEBUG:** Final results - EC2: {result_ec2.shape}, S3: {result_s3.shape}")
+        debug_write(f"🔍 **DEBUG:** Final results - EC2: {result_ec2.shape}")
         
-        return result_ec2, result_s3
+        return result_ec2
     except Exception as e:
         debug_write(f"🔍 **DEBUG:** Scan failed with error: {e}")
         st.warning(f"Live scan failed: {e}")
-        return pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame()
 
 # === App ===
 render_page_header(
@@ -209,7 +208,6 @@ debug_write("🔍 **DEBUG:** Main app.py loaded")
 
 # Session defaults
 st.session_state.setdefault("ec2_df", pd.DataFrame())
-st.session_state.setdefault("s3_df", pd.DataFrame())
 # Don't set a default single region - prefer auto-discovery of all enabled regions
 # Users can still specify regions via scan_regions in session state if needed
 
@@ -228,7 +226,6 @@ st.session_state.setdefault("aws_auth_method", "user")
 debug_write("🔍 **DEBUG:** Session state initialized")
 debug_write(f"   - Region: {st.session_state.get('region', 'NOT SET')}")
 debug_write(f"   - EC2 data: {st.session_state.get('ec2_df', pd.DataFrame()).shape if not st.session_state.get('ec2_df', pd.DataFrame()).empty else 'EMPTY'}")
-debug_write(f"   - S3 data: {st.session_state.get('s3_df', pd.DataFrame()).shape if not st.session_state.get('s3_df', pd.DataFrame()).empty else 'EMPTY'}")
 debug_write(f"   - Last scan: {st.session_state.get('last_scan_at', 'NEVER')}")
 
 # DEBUG: Credentials check
@@ -243,12 +240,11 @@ else:
 # Optional auto-run is disabled by default to avoid blocking app startup in deployments.
 # Enable by setting env CWT_AUTO_SCAN_ON_START=true
 auto_scan = os.getenv("CWT_AUTO_SCAN_ON_START", "false").strip().lower() == "true"
-if auto_scan and st.session_state["ec2_df"].empty and st.session_state["s3_df"].empty:
+if auto_scan and st.session_state["ec2_df"].empty:
     with st.spinner("Running initial live scan across all enabled regions..."):
         # Pass None to auto-discover all enabled regions
-        ec2_df, s3_df = run_live_scans(region=None)
+        ec2_df = run_live_scans(region=None)
         st.session_state["ec2_df"] = ec2_df
-        st.session_state["s3_df"]  = s3_df
 
 
 

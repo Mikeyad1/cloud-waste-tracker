@@ -11,7 +11,7 @@ from typing import Tuple, Optional, Dict, Any, List
 from cwt_ui.services.scans import fetch_savings_plan_utilization
 
 
-def run_aws_scan(region: Optional[str] | List[str] | None = None) -> Tuple[pd.DataFrame, pd.DataFrame]:
+def run_aws_scan(region: Optional[str] | List[str] | None = None) -> pd.DataFrame:
     """
     Run AWS scan for specified region(s) or globally.
     
@@ -22,7 +22,7 @@ def run_aws_scan(region: Optional[str] | List[str] | None = None) -> Tuple[pd.Da
             - List of regions: Scan multiple specific regions
     
     Returns:
-        Tuple of (EC2 DataFrame, S3 DataFrame) with results from scanned regions
+        EC2 DataFrame with results from scanned regions
     """
     
     # Show loading state with region info
@@ -84,11 +84,10 @@ def run_aws_scan(region: Optional[str] | List[str] | None = None) -> Tuple[pd.Da
                     aws_auth_method = "user"
             
             # Run the scan
-            ec2_df, s3_df = run_all_scans(region=region, aws_credentials=aws_credentials, aws_auth_method=aws_auth_method)
+            ec2_df = run_all_scans(region=region, aws_credentials=aws_credentials, aws_auth_method=aws_auth_method)
             
             # Update session state
             st.session_state["ec2_df"] = ec2_df
-            st.session_state["s3_df"] = s3_df
             st.session_state["last_scan_at"] = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
 
             sp_df, sp_summary, sp_util_trend, sp_coverage_trend = fetch_savings_plan_utilization(
@@ -136,15 +135,13 @@ def run_aws_scan(region: Optional[str] | List[str] | None = None) -> Tuple[pd.Da
                 regions_scanned = set()
                 if not ec2_df.empty and "region" in ec2_df.columns:
                     regions_scanned.update(ec2_df["region"].unique())
-                if not s3_df.empty and "region" in s3_df.columns:
-                    regions_scanned.update(s3_df["region"].unique())
                 if regions_scanned:
                     regions_list = sorted(list(regions_scanned))
                     st.success(f"✅ Scan complete! Discovered and scanned {len(regions_scanned)} regions: {', '.join(regions_list)}")
                 else:
                     st.success("✅ Scan complete!")
             
-            return ec2_df, s3_df
+            return ec2_df
             
         except Exception as e:
             error_msg = str(e)
@@ -155,7 +152,7 @@ def run_aws_scan(region: Optional[str] | List[str] | None = None) -> Tuple[pd.Da
             # Show exception details to help debug
             with st.expander("🔍 View Error Details"):
                 st.code(full_traceback, language="python")
-            return pd.DataFrame(), pd.DataFrame()
+            return pd.DataFrame()
 
 
 def render_scan_button(show_region_selector: bool = True) -> bool:

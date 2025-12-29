@@ -49,20 +49,18 @@ if settings.FEATURES.get("api_endpoints", False):
     async def get_latest_scan():
         """Get the most recent scan results"""
         try:
-            ec2_df, s3_df, scanned_at = get_last_scan()
+            ec2_df, scanned_at = get_last_scan()
             
             # Convert DataFrames to JSON-serializable format
             ec2_data = ec2_df.to_dict("records") if not ec2_df.empty else []
-            s3_data = s3_df.to_dict("records") if not s3_df.empty else []
             
             # Generate summary
-            summary = scan_service.get_scan_summary(ec2_df, s3_df)
+            summary = scan_service.get_scan_summary(ec2_df)
             
             return {
                 "scanned_at": scanned_at,
                 "summary": summary,
-                "ec2_findings": ec2_data,
-                "s3_findings": s3_data
+                "ec2_findings": ec2_data
             }
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
@@ -75,12 +73,12 @@ if settings.FEATURES.get("api_endpoints", False):
             raise HTTPException(status_code=403, detail="Scan triggering only available in development")
         
         try:
-            ec2_df, s3_df, scanned_at = scan_service.run_full_scan(
+            ec2_df, scanned_at = scan_service.run_full_scan(
                 region=region,
                 save_to_db=True
             )
             
-            summary = scan_service.get_scan_summary(ec2_df, s3_df)
+            summary = scan_service.get_scan_summary(ec2_df)
             
             return {
                 "message": "Scan completed successfully",

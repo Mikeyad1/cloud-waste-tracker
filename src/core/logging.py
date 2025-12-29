@@ -55,8 +55,8 @@ class CloudWasteLogger:
             scan_type=scan_type
         )
     
-    def log_scan_complete(self, region: str, ec2_count: int, s3_count: int, 
-                         duration_seconds: float, scan_type: str = "full"):
+    def log_scan_complete(self, region: str, ec2_count: int, 
+                         duration_seconds: float, scan_type: str = "ec2"):
         """Log the completion of a scan operation"""
         self._log_structured(
             "INFO",
@@ -65,7 +65,6 @@ class CloudWasteLogger:
             region=region,
             scan_type=scan_type,
             ec2_findings=ec2_count,
-            s3_findings=s3_count,
             duration_seconds=duration_seconds
         )
     

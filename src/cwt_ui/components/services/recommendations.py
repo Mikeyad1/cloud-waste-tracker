@@ -8,7 +8,7 @@ import streamlit as st
 import pandas as pd
 from typing import List, Dict, Optional
 
-def render_recommendations_summary(ec2_df: pd.DataFrame, s3_df: pd.DataFrame, formatters) -> None:
+def render_recommendations_summary(ec2_df: pd.DataFrame, formatters) -> None:
     """Render a summary of recommendations with implementation steps."""
     
     # Collect all actionable recommendations
@@ -27,21 +27,6 @@ def render_recommendations_summary(ec2_df: pd.DataFrame, s3_df: pd.DataFrame, fo
                     "action": row.get("action", row.get("recommendation", "")),
                     "implementation_steps": row.get("implementation_steps", []),
                     "details": f"CPU: {row.get('avg_cpu_7d', 0):.1f}% | Type: {row.get('instance_type', '')}"
-                })
-    
-    # Process S3 recommendations
-    if s3_df is not None and not s3_df.empty:
-        for _, row in s3_df.iterrows():
-            if row.get("recommendation", "").upper() != "OK":
-                recommendations.append({
-                    "type": "S3 Bucket",
-                    "resource": row.get("bucket", ""),
-                    "priority": row.get("priority", "MEDIUM"),
-                    "monthly_cost": row.get("monthly_cost_usd", 0),
-                    "potential_savings": row.get("potential_savings_usd", 0),
-                    "action": row.get("action", row.get("recommendation", "")),
-                    "implementation_steps": row.get("implementation_steps", []),
-                    "details": f"Size: {row.get('size_total_gb', 0):.1f}GB | Cold: {row.get('standard_cold_gb', 0):.1f}GB"
                 })
     
     if not recommendations:
@@ -97,22 +82,18 @@ def render_recommendations_summary(ec2_df: pd.DataFrame, s3_df: pd.DataFrame, fo
                     st.divider()
 
 
-def render_quick_actions(ec2_df: pd.DataFrame, s3_df: pd.DataFrame) -> None:
+def render_quick_actions(ec2_df: pd.DataFrame) -> None:
     """Render quick action buttons for common optimizations."""
     
     st.subheader("⚡ Quick Actions")
     
     # Calculate quick stats
     ec2_waste = 0
-    s3_waste = 0
     
     if ec2_df is not None and not ec2_df.empty:
         ec2_waste = ec2_df.get("potential_savings_usd", pd.Series()).sum()
     
-    if s3_df is not None and not s3_df.empty:
-        s3_waste = s3_df.get("potential_savings_usd", pd.Series()).sum()
-    
-    col1, col2, col3 = st.columns(3)
+    col1, col2 = st.columns(2)
     
     with col1:
         if ec2_waste > 0:
@@ -125,16 +106,6 @@ def render_quick_actions(ec2_df: pd.DataFrame, s3_df: pd.DataFrame) -> None:
             st.button("🛑 Stop Idle Instances", disabled=True, help="No idle instances found")
     
     with col2:
-        if s3_waste > 0:
-            st.button(
-                f"📦 Optimize S3 Storage",
-                help=f"Move cold data to cheaper storage classes. Potential savings: ${s3_waste:.2f}/month",
-                disabled=True  # Disabled for demo - would trigger actual AWS API calls
-            )
-        else:
-            st.button("📦 Optimize S3 Storage", disabled=True, help="No S3 optimization opportunities found")
-    
-    with col3:
         st.button(
             f"📊 Generate Cost Report",
             help="Generate detailed cost optimization report",

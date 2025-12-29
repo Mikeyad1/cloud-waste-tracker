@@ -12,10 +12,6 @@ try:
 except Exception:
     _ec2_scanner = None  # type: ignore
 
-try:
-    from scanners import s3_scanner as _s3_scanner  # type: ignore
-except Exception:
-    _s3_scanner = None  # type: ignore
 
 try:
     from scanners.savings_plans_scanner import scan_savings_plans  # type: ignore
@@ -38,8 +34,8 @@ def run_all_scans(
     region: str | List[str] | None = None, 
     aws_credentials: Optional[Mapping[str, str]] = None, 
     aws_auth_method: str = "user"
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Run both EC2 and S3 scans, returning normalized DataFrames for the UI.
+) -> pd.DataFrame:
+    """Run EC2 scans, returning normalized DataFrame for the UI.
     
     If aws_credentials is provided, temporarily override environment variables for the
     duration of this call via process environment variables only (in-memory).
@@ -140,10 +136,9 @@ def _scan_multiple_regions(
     regions: List[str],
     aws_credentials: Optional[Mapping[str, str]],
     aws_auth_method: str
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
+) -> pd.DataFrame:
     """Scan multiple regions and aggregate results."""
     all_ec2_results = []
-    all_s3_results = []
     
     if os.getenv("APP_ENV", "development").strip().lower() != "production":
         print(f"DEBUG: Starting scan of {len(regions)} regions: {regions}")
@@ -153,17 +148,13 @@ def _scan_multiple_regions(
             if os.getenv("APP_ENV", "development").strip().lower() != "production":
                 print(f"DEBUG: Scanning region {region}...")
             ec2_df = scan_ec2(region=region)
-            s3_df = scan_s3(region=region)
             
             ec2_count = len(ec2_df) if not ec2_df.empty else 0
-            s3_count = len(s3_df) if not s3_df.empty else 0
             if os.getenv("APP_ENV", "development").strip().lower() != "production":
-                print(f"DEBUG: Region {region}: Found {ec2_count} EC2 instances, {s3_count} S3 buckets")
+                print(f"DEBUG: Region {region}: Found {ec2_count} EC2 instances")
             
             if not ec2_df.empty:
                 all_ec2_results.append(ec2_df)
-            if not s3_df.empty:
-                all_s3_results.append(s3_df)
         except Exception as e:
             # Log error but continue with other regions
             print(f"⚠️  Error scanning {region}: {e}")
@@ -173,14 +164,13 @@ def _scan_multiple_regions(
     
     # Combine results
     final_ec2 = pd.concat(all_ec2_results, ignore_index=True) if all_ec2_results else pd.DataFrame()
-    final_s3 = pd.concat(all_s3_results, ignore_index=True) if all_s3_results else pd.DataFrame()
     
     if os.getenv("APP_ENV", "development").strip().lower() != "production":
-        print(f"DEBUG: Total results: {len(final_ec2)} EC2 instances, {len(final_s3)} S3 buckets")
+        print(f"DEBUG: Total results: {len(final_ec2)} EC2 instances")
     
     _update_savings_plans_cache()
     
-    return final_ec2, final_s3
+    return final_ec2
 def _update_savings_plans_cache() -> None:
     """Refresh cached Savings Plans utilization results."""
     global _LAST_SAVINGS_PLAN_RESULTS
@@ -220,23 +210,6 @@ def scan_ec2(region: Optional[str] = None) -> pd.DataFrame:
     return _normalize_ec2(df)
 
 
-def scan_s3(region: Optional[str] = None) -> pd.DataFrame:
-    """
-    Run the S3 scan and return a normalized DataFrame for the UI.
-    Recommended columns: bucket, region, size_total_gb, objects_total,
-    standard_cold_gb, standard_cold_objects, lifecycle_defined,
-    recommendation, notes, type
-    """
-    if _s3_scanner is None:
-        return _empty_s3_frame()
-
-    data = _call_scanner(
-        _s3_scanner,
-        preferred=["scan_s3", "run", "run_s3", "main"],
-        kwargs={"region": region} if region else {},
-    )
-    df = _to_dataframe(data)
-    return _normalize_s3(df)
 
 
 # ------------------------------
@@ -328,71 +301,6 @@ def _normalize_ec2(df: pd.DataFrame) -> pd.DataFrame:
     return df[cols]
 
 
-def _normalize_s3(df: pd.DataFrame) -> pd.DataFrame:
-    """Ensure expected S3 columns and types for the UI."""
-    if df is None or df.empty:
-        return _empty_s3_frame()
-
-    df = df.copy()
-
-    # Aliases
-    alias_map = {
-        "cold_gb": "standard_cold_gb",
-        "cold_objects": "standard_cold_objects",
-        "size_gb": "size_total_gb",
-        "objects": "objects_total",
-        "monthly_usd": "monthly_cost_usd",
-        "cost_monthly_usd": "monthly_cost_usd",
-        "potential_savings": "potential_savings_usd",
-        "savings": "potential_savings_usd",
-        "type_": "type",
-    }
-    for old, new in alias_map.items():
-        if old in df.columns and new not in df.columns:
-            df[new] = df[old]
-
-    # Ensure required columns
-    required_defaults = {
-        "bucket": "",
-        "region": "",
-        "size_total_gb": 0.0,
-        "objects_total": 0,
-        "standard_cold_gb": 0.0,
-        "standard_cold_objects": 0,
-        "lifecycle_defined": False,
-        "monthly_cost_usd": 0.0,
-        "potential_savings_usd": 0.0,
-        "recommendation": "",
-        "notes": "",
-        "type": "s3_bucket_summary",
-    }
-    for col, default in required_defaults.items():
-        if col not in df.columns:
-            df[col] = default
-
-    # Coerce numeric
-    df["size_total_gb"] = _coerce_float(df["size_total_gb"])
-    df["standard_cold_gb"] = _coerce_float(df["standard_cold_gb"])
-    df["monthly_cost_usd"] = _coerce_float(df["monthly_cost_usd"])
-    df["potential_savings_usd"] = _coerce_float(df["potential_savings_usd"])
-
-    # Stable column order
-    cols = [
-        "bucket",
-        "region",
-        "size_total_gb",
-        "objects_total",
-        "standard_cold_gb",
-        "standard_cold_objects",
-        "lifecycle_defined",
-        "monthly_cost_usd",
-        "potential_savings_usd",
-        "recommendation",
-        "notes",
-        "type",
-    ]
-    cols = [c for c in cols if c in df.columns] + [c for c in df.columns if c not in cols]
-    return df[cols]
 
 
 def _empty_ec2_frame() -> pd.DataFrame:
@@ -411,23 +319,6 @@ def _empty_ec2_frame() -> pd.DataFrame:
     )
 
 
-def _empty_s3_frame() -> pd.DataFrame:
-    return pd.DataFrame(
-        columns=[
-            "bucket",
-            "region",
-            "size_total_gb",
-            "objects_total",
-            "standard_cold_gb",
-            "standard_cold_objects",
-            "lifecycle_defined",
-            "monthly_cost_usd",
-            "potential_savings_usd",
-            "recommendation",
-            "notes",
-            "type",
-        ]
-    )
 
 
 def _coerce_float(series: pd.Series) -> pd.Series:

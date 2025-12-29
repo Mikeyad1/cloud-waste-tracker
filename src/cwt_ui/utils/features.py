@@ -80,8 +80,8 @@ def render_advanced_filters():
         with col2:
             resource_types = st.multiselect(
                 "Resource Types", 
-                ["EC2", "S3", "RDS", "Lambda"], 
-                default=["EC2", "S3"]
+                ["EC2"], 
+                default=["EC2"]
             )
         return {"cost_threshold": cost_threshold, "resource_types": resource_types}
 

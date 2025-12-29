@@ -13,7 +13,7 @@ def run_all_scans(
     region: str | List[str] | None = None, 
     aws_credentials: Optional[Mapping[str, str]] = None, 
     aws_auth_method: str = "user"
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
+) -> pd.DataFrame:
     """Run enhanced scans with clear cost analysis and actionable recommendations.
     
     Args:
@@ -27,29 +27,20 @@ def run_all_scans(
     # Delegate to the main scans service which handles multi-region logic
     try:
         from cwt_ui.services.scans import run_all_scans as _run_all_scans
-        ec2_df, s3_df = _run_all_scans(region=region, aws_credentials=aws_credentials, aws_auth_method=aws_auth_method)
+        ec2_df = _run_all_scans(region=region, aws_credentials=aws_credentials, aws_auth_method=aws_auth_method)
         
         # Enhance the results with better recommendations
         if not ec2_df.empty:
             ec2_df = _enhance_ec2_dataframe(ec2_df)
-        if not s3_df.empty:
-            s3_df = _enhance_s3_dataframe(s3_df)
         
-        return ec2_df, s3_df
+        return ec2_df
     except Exception as e:
         print(f"Enhanced scan error: {e}")
-        return pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame()
 
 
 def _enhance_ec2_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """Enhance EC2 DataFrame with clear recommendations."""
-    if df.empty:
-        return df
-    return df.copy()  # Already enhanced by scanners, just pass through for now
-
-
-def _enhance_s3_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    """Enhance S3 DataFrame with clear recommendations."""
     if df.empty:
         return df
     return df.copy()  # Already enhanced by scanners, just pass through for now
@@ -126,89 +117,5 @@ def _enhance_ec2_data(findings: list) -> pd.DataFrame:
     
     return df
 
-
-def _enhance_s3_data(findings: list) -> pd.DataFrame:
-    """Enhance S3 data with clear recommendations and dollar amounts."""
-    if not findings:
-        return pd.DataFrame()
-    
-    df = pd.DataFrame(findings)
-    
-    # Filter to only bucket summaries for main display
-    bucket_summaries = df[df['type'] == 's3_bucket_summary'].copy()
-    
-    if bucket_summaries.empty:
-        return pd.DataFrame()
-    
-    def get_clear_recommendation(row):
-        bucket = row.get('bucket', '')
-        cold_gb = row.get('standard_cold_gb', 0)
-        lifecycle = row.get('lifecycle_defined', False)
-        total_gb = row.get('size_total_gb', 0)
-        
-        if not lifecycle and cold_gb > 0:
-            return f"📦 OPTIMIZE: {bucket} - Save ${cold_gb * 0.01:.2f}/month (Move {cold_gb:.1f}GB cold data to IA)"
-        elif not lifecycle:
-            return f"⚙️ SETUP: {bucket} - Add lifecycle rules to prevent future waste"
-        elif cold_gb > 0:
-            return f"📦 OPTIMIZE: {bucket} - Save ${cold_gb * 0.01:.2f}/month (Move {cold_gb:.1f}GB cold data to IA)"
-        else:
-            return f"✅ OK: {bucket} - Well optimized"
-    
-    def get_priority(row):
-        cold_gb = row.get('standard_cold_gb', 0)
-        lifecycle = row.get('lifecycle_defined', False)
-        
-        if cold_gb > 10:  # More than 10GB of cold data
-            return "🔴 HIGH"
-        elif cold_gb > 0 or not lifecycle:
-            return "🟡 MEDIUM"
-        else:
-            return "🟢 LOW"
-    
-    def get_action_steps(row):
-        bucket = row.get('bucket', '')
-        cold_gb = row.get('standard_cold_gb', 0)
-        lifecycle = row.get('lifecycle_defined', False)
-        
-        steps = []
-        if not lifecycle:
-            steps.extend([
-                f"1. Go to S3 Console → {bucket} → Management → Lifecycle",
-                "2. Create rule: Transition to IA after 30 days",
-                "3. Add expiration rule for old versions"
-            ])
-        
-        if cold_gb > 0:
-            steps.extend([
-                f"4. Move {cold_gb:.1f}GB cold data to IA storage class",
-                f"5. Potential savings: ${cold_gb * 0.01:.2f}/month"
-            ])
-        
-        if not steps:
-            steps = ["No action needed - bucket is well optimized"]
-        
-        return steps
-    
-    # Add enhanced columns
-    bucket_summaries['clear_recommendation'] = bucket_summaries.apply(get_clear_recommendation, axis=1)
-    bucket_summaries['priority'] = bucket_summaries.apply(get_priority, axis=1)
-    bucket_summaries['action_steps'] = bucket_summaries.apply(get_action_steps, axis=1)
-    bucket_summaries['potential_savings_usd'] = bucket_summaries.apply(lambda row: 
-        row.get('standard_cold_gb', 0) * 0.01, axis=1)  # Approximate savings
-    
-    # Rename columns for clarity
-    bucket_summaries = bucket_summaries.rename(columns={
-        'bucket': 'Bucket',
-        'region': 'Region',
-        'size_total_gb': 'Total Size (GB)',
-        'objects_total': 'Objects',
-        'standard_cold_gb': 'Cold Data (GB)',
-        'lifecycle_defined': 'Lifecycle Rules',
-        'clear_recommendation': 'Recommendation',
-        'potential_savings_usd': 'Potential Savings ($)'
-    })
-    
-    return bucket_summaries
 
 

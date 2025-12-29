@@ -12,7 +12,6 @@ from ..logging import logger
 from ..validators import InputValidator
 
 from scanners.ec2_scanner import scan_ec2
-from scanners.s3_scanner import scan_s3
 from db.repo import save_scan_results
 
 
@@ -28,9 +27,9 @@ class ScanService:
         aws_credentials: Optional[Mapping[str, str]] = None,
         aws_auth_method: str = "user",
         save_to_db: bool = True
-    ) -> Tuple[pd.DataFrame, pd.DataFrame, str]:
+    ) -> Tuple[pd.DataFrame, str]:
         """
-        Run a complete scan (EC2 + S3) and optionally save to database.
+        Run a complete scan (EC2) and optionally save to database.
         
         Args:
             region: AWS region to scan
@@ -39,7 +38,7 @@ class ScanService:
             save_to_db: Whether to save results to database
             
         Returns:
-            Tuple of (ec2_df, s3_df, timestamp)
+            Tuple of (ec2_df, timestamp)
             
         Raises:
             ValidationError: If input parameters are invalid
@@ -56,13 +55,13 @@ class ScanService:
                 raise ValidationError(f"Invalid auth method: {aws_auth_method}. Must be 'user' or 'role'")
             
             # Log scan start
-            self.logger.log_scan_start(region, "full")
+            self.logger.log_scan_start(region, "ec2")
             
             # Import the existing scan orchestrator
             from cwt_ui.services.scans import run_all_scans
             
             # Run the scans using existing logic
-            ec2_df, s3_df = run_all_scans(
+            ec2_df = run_all_scans(
                 region=region,
                 aws_credentials=aws_credentials,
                 aws_auth_method=aws_auth_method
@@ -75,7 +74,7 @@ class ScanService:
             # Save to database if requested
             if save_to_db:
                 try:
-                    save_scan_results(ec2_df, s3_df, scanned_at)
+                    save_scan_results(ec2_df, scanned_at)
                     self.logger.log_database_operation("save_scan_results", "scans", True)
                 except Exception as e:
                     self.logger.log_database_operation("save_scan_results", "scans", False, e)
@@ -86,12 +85,11 @@ class ScanService:
             self.logger.log_scan_complete(
                 region, 
                 len(ec2_df), 
-                len(s3_df), 
                 duration, 
-                "full"
+                "ec2"
             )
             
-            return ec2_df, s3_df, scanned_at
+            return ec2_df, scanned_at
             
         except ValidationError:
             raise
@@ -109,7 +107,7 @@ class ScanService:
             from cwt_ui.services.scans import scan_ec2
             result = scan_ec2(region)
             
-            self.logger.log_scan_complete(region, len(result), 0, 0, "ec2")
+            self.logger.log_scan_complete(region, len(result), 0.0, "ec2")
             return result
             
         except ValidationError:
@@ -118,32 +116,12 @@ class ScanService:
             self.logger.log_scan_error(region, e, "ec2")
             raise ScanError(f"EC2 scan failed for region {region}: {e}")
     
-    def run_s3_scan(self, region: str = "us-east-1") -> pd.DataFrame:
-        """Run S3-only scan with validation and logging"""
-        try:
-            region = InputValidator.validate_aws_region(region)
-            self.logger.log_scan_start(region, "s3")
-            
-            from cwt_ui.services.scans import scan_s3
-            result = scan_s3(region)
-            
-            self.logger.log_scan_complete(region, 0, len(result), 0, "s3")
-            return result
-            
-        except ValidationError:
-            raise
-        except Exception as e:
-            self.logger.log_scan_error(region, e, "s3")
-            raise ScanError(f"S3 scan failed for region {region}: {e}")
-    
-    def get_scan_summary(self, ec2_df: pd.DataFrame, s3_df: pd.DataFrame) -> dict:
+    def get_scan_summary(self, ec2_df: pd.DataFrame) -> dict:
         """Generate scan summary statistics"""
         summary = {
             "ec2_instances": len(ec2_df),
-            "s3_buckets": len(s3_df),
-            "total_findings": len(ec2_df) + len(s3_df),
-            "estimated_monthly_waste": 0.0,
-            "cold_storage_gb": 0.0
+            "total_findings": len(ec2_df),
+            "estimated_monthly_waste": 0.0
         }
         
         # Calculate EC2 waste
@@ -154,13 +132,6 @@ class ScanService:
                     pd.to_numeric(ec2_df.loc[waste_mask, "monthly_cost_usd"], errors="coerce")
                     .fillna(0.0).sum()
                 )
-        
-        # Calculate S3 cold storage
-        if not s3_df.empty and "standard_cold_gb" in s3_df.columns:
-            summary["cold_storage_gb"] = float(
-                pd.to_numeric(s3_df["standard_cold_gb"], errors="coerce")
-                .fillna(0.0).sum()
-            )
         
         return summary
     

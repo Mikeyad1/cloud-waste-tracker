@@ -77,14 +77,12 @@ def finish_scan(scan_id: int, status: str = "success") -> None:
             scan.finished_at = datetime.utcnow()
 
 
-def save_scan_results(ec2_df: pd.DataFrame, s3_df: pd.DataFrame, scanned_at: str) -> None:
+def save_scan_results(ec2_df: pd.DataFrame, scanned_at: str) -> None:
     """שמירת תוצאות סריקה למסד הנתונים"""
     try:
         # Validate inputs
         if not isinstance(ec2_df, pd.DataFrame):
             raise ValidationError("ec2_df must be a pandas DataFrame")
-        if not isinstance(s3_df, pd.DataFrame):
-            raise ValidationError("s3_df must be a pandas DataFrame")
         if not scanned_at:
             raise ValidationError("scanned_at cannot be empty")
         
@@ -131,26 +129,6 @@ def save_scan_results(ec2_df: pd.DataFrame, s3_df: pd.DataFrame, scanned_at: str
                         logger.log_database_operation("save_ec2_finding", "findings", False, e)
                         # Continue with other findings even if one fails
             
-            # Save S3 findings
-            s3_count = 0
-            if not s3_df.empty:
-                for _, row in s3_df.iterrows():
-                    try:
-                        finding = Finding(
-                            scan_id=scan.id,
-                            resource_id=row.get('bucket', ''),
-                            resource_type='S3',
-                            issue_type=row.get('type', 's3_bucket_summary'),
-                            estimated_saving_usd=0.0,  # S3 savings are harder to quantify
-                            region=row.get('region', ''),
-                            attributes=row.to_dict()
-                        )
-                        s.add(finding)
-                        s3_count += 1
-                    except Exception as e:
-                        logger.log_database_operation("save_s3_finding", "findings", False, e)
-                        # Continue with other findings even if one fails
-            
             # Commit the transaction
             s.commit()
             
@@ -158,8 +136,7 @@ def save_scan_results(ec2_df: pd.DataFrame, s3_df: pd.DataFrame, scanned_at: str
             logger.log_database_operation("save_scan_results", "scans", True)
             logger.log_system_event("scan_results_saved", 
                                   scan_id=scan.id, 
-                                  ec2_findings=ec2_count, 
-                                  s3_findings=s3_count)
+                                  ec2_findings=ec2_count)
             
     except ValidationError:
         raise
@@ -168,7 +145,7 @@ def save_scan_results(ec2_df: pd.DataFrame, s3_df: pd.DataFrame, scanned_at: str
         raise DatabaseError(f"Failed to save scan results: {e}")
 
 
-def get_last_scan() -> tuple[pd.DataFrame, pd.DataFrame, str]:
+def get_last_scan() -> tuple[pd.DataFrame, str]:
     """קבלת הסריקה האחרונה ממסד הנתונים"""
     try:
         with get_db() as s:
@@ -181,7 +158,7 @@ def get_last_scan() -> tuple[pd.DataFrame, pd.DataFrame, str]:
             )
             
             if not scan:
-                return pd.DataFrame(), pd.DataFrame(), ""
+                return pd.DataFrame(), ""
             
             # Get findings for this scan
             findings = s.scalars(
@@ -189,21 +166,15 @@ def get_last_scan() -> tuple[pd.DataFrame, pd.DataFrame, str]:
                 .where(Finding.scan_id == scan.id)
             ).all()
             
-            # Separate EC2 and S3 findings
+            # Collect EC2 findings
             ec2_data = []
-            s3_data = []
             
             for finding in findings:
                 if finding.resource_type == 'EC2':
                     ec2_data.append(finding.attributes)
-                elif finding.resource_type == 'S3':
-                    # Only include the main bucket summary, not individual issue types
-                    if finding.attributes.get('type') == 's3_bucket_summary':
-                        s3_data.append(finding.attributes)
             
-            # Convert to DataFrames
+            # Convert to DataFrame
             ec2_df = pd.DataFrame(ec2_data) if ec2_data else pd.DataFrame()
-            s3_df = pd.DataFrame(s3_data) if s3_data else pd.DataFrame()
             
             # Format timestamp - convert UTC to Israel time (UTC+3)
             if scan.finished_at:
@@ -213,14 +184,14 @@ def get_last_scan() -> tuple[pd.DataFrame, pd.DataFrame, str]:
             else:
                 scanned_at = ""
             
-            return ec2_df, s3_df, scanned_at
+            return ec2_df, scanned_at
             
     except Exception as e:
         # If database is corrupted or empty, return empty data gracefully
         import os
         if os.getenv("APP_ENV", "development").strip().lower() != "production":
             print(f"🔍 DEBUG: Database error in get_last_scan: {e}")
-        return pd.DataFrame(), pd.DataFrame(), ""
+        return pd.DataFrame(), ""
 
 
 def clear_all_scans() -> None:

@@ -75,8 +75,8 @@ def main():
             sys.exit(1)
         
         # Run the scans using the new service
-        print("📊 Running EC2 and S3 scans...")
-        ec2_df, s3_df, scanned_at = scan_service.run_full_scan(
+        print("📊 Running EC2 scans...")
+        ec2_df, scanned_at = scan_service.run_full_scan(
             region=args.region, 
             aws_credentials=aws_credentials, 
             aws_auth_method=aws_auth_method,
@@ -84,13 +84,11 @@ def main():
         )
         
         # Generate summary
-        summary = scan_service.get_scan_summary(ec2_df, s3_df)
+        summary = scan_service.get_scan_summary(ec2_df)
         
         print(f"✅ Scan completed successfully at {scanned_at}")
         print(f"   - EC2 findings: {summary['ec2_instances']}")
-        print(f"   - S3 findings: {summary['s3_buckets']}")
         print(f"   - Estimated monthly waste: ${summary['estimated_monthly_waste']:.2f}")
-        print(f"   - Cold storage: {summary['cold_storage_gb']:.2f} GB")
         
     except Exception as e:
         print(f"❌ Scan failed: {e}")

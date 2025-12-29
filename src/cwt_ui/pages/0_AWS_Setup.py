@@ -361,19 +361,19 @@ def render() -> None:
             with st.spinner("Scanning..." if scan_mode == "regional" else "Scanning all enabled AWS regions globally..."):
                 try:
                     # Pass region parameter - None for global, selected region for regional
-                    ec2_df, s3_df = run_aws_scan(region=scan_region)
+                    ec2_df = run_aws_scan(region=scan_region)
                     
-                    if not ec2_df.empty or not s3_df.empty:
+                    if not ec2_df.empty:
                         if scan_mode == "global":
                             regions_found = sorted(ec2_df['region'].unique().tolist()) if 'region' in ec2_df.columns and not ec2_df.empty else []
                             st.success("✅ **Scan complete!** Found AWS resources.")
                             if regions_found:
                                 st.info(f"📊 Found {len(ec2_df)} EC2 instances across {len(regions_found)} regions: {', '.join(regions_found)}")
                             else:
-                                st.info(f"📊 Found {len(ec2_df)} EC2 instances and {len(s3_df)} S3 buckets.")
+                                st.info(f"📊 Found {len(ec2_df)} EC2 instances.")
                         else:
                             st.success(f"✅ **Regional scan complete!** Found resources in {selected_region}.")
-                            st.info(f"📊 Found {len(ec2_df)} EC2 instances and {len(s3_df)} S3 buckets in {selected_region}.")
+                            st.info(f"📊 Found {len(ec2_df)} EC2 instances in {selected_region}.")
                         st.balloons()
                     else:
                         # Check if there was an error in the scan

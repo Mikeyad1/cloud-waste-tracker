@@ -100,6 +100,95 @@ def _scan_lambda_functions(region: Optional[str] | List[str] | None, ec2_df: pd.
         st.session_state.pop("lambda_df", None)
 
 
+def _scan_fargate_tasks(region: Optional[str] | List[str] | None, ec2_df: pd.DataFrame) -> None:
+    """Helper function to scan Fargate tasks and store in session state.
+    
+    Note: This function expects AWS credentials to be available in the environment
+    variables (via _temporary_env context manager or system environment).
+    """
+    try:
+        import traceback
+        from scanners.fargate_scanner import scan_fargate_tasks
+        
+        # Determine regions to scan (reuse logic from EC2 scan)
+        if region is None:
+            # Extract regions from EC2 results if available
+            if not ec2_df.empty and "region" in ec2_df.columns:
+                fargate_regions = sorted(ec2_df["region"].unique().tolist())
+                print(f"DEBUG: Using regions from EC2 scan results: {fargate_regions}")
+            else:
+                # Fallback: Try to discover enabled regions or use common ones
+                try:
+                    from core.services.region_service import discover_enabled_regions
+                    # Try to discover regions (credentials should be in environment)
+                    fargate_regions = discover_enabled_regions(None, "user")
+                    if not fargate_regions:
+                        from core.services.region_service import _common_regions
+                        fargate_regions = _common_regions()
+                    print(f"DEBUG: Discovered regions for Fargate scan: {fargate_regions}")
+                except Exception as e:
+                    print(f"DEBUG: Region discovery failed, using common regions: {e}")
+                    from core.services.region_service import _common_regions
+                    fargate_regions = _common_regions()
+        elif isinstance(region, str):
+            fargate_regions = [region]
+            print(f"DEBUG: Using specified region for Fargate scan: {fargate_regions}")
+        else:
+            fargate_regions = region
+            print(f"DEBUG: Using specified regions for Fargate scan: {fargate_regions}")
+        
+        if not fargate_regions:
+            print("Warning: No regions available for Fargate scan")
+            st.session_state["fargate_df"] = pd.DataFrame()
+            return
+        
+        print(f"DEBUG: Starting Fargate scan for regions: {fargate_regions}")
+        
+        # Scan Fargate tasks (credentials should be in environment)
+        all_fargate_findings = []
+        for reg in fargate_regions:
+            try:
+                # Pass None for credentials - rely on environment variables already set
+                findings = scan_fargate_tasks(reg, None)
+                if findings:
+                    all_fargate_findings.extend(findings)
+                    print(f"DEBUG: Found {len(findings)} Fargate tasks in {reg}")
+            except Exception as e:
+                error_trace = traceback.format_exc()
+                print(f"ERROR: Failed to scan Fargate tasks in {reg}: {e}")
+                print(f"ERROR: Full traceback:\n{error_trace}")
+                continue
+        
+        # Convert to DataFrame and store in session state
+        if all_fargate_findings:
+            fargate_df = pd.DataFrame(all_fargate_findings)
+            fargate_df = fargate_df.sort_values(["cluster_name", "service_name"]).reset_index(drop=True)
+            st.session_state["fargate_df"] = fargate_df
+            print(f"DEBUG: Fargate scan complete. Total tasks: {len(fargate_df)}")
+        else:
+            print("DEBUG: Fargate scan complete but no tasks found")
+            print(f"DEBUG: Scanned regions: {fargate_regions}")
+            # Show warning if no tasks found but regions were scanned
+            if fargate_regions:
+                st.warning(
+                    f"⚠️ **No Fargate tasks found** in scanned regions: {', '.join(fargate_regions)}. "
+                    "This could mean:\n"
+                    "- Your IAM role lacks `ecs:ListClusters`, `ecs:ListTasks`, or `ecs:DescribeTasks` permission\n"
+                    "- No Fargate tasks exist in the scanned regions\n"
+                    "- Tasks exist in a different region\n\n"
+                    "Check the console/terminal for detailed error messages."
+                )
+            st.session_state["fargate_df"] = pd.DataFrame()
+    except Exception as e:
+        # Log error but don't fail the scan
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"ERROR: Fargate scan failed: {e}")
+        print(f"ERROR: Full traceback:\n{error_trace}")
+        st.warning(f"⚠️ **Fargate scanning failed:** {str(e)}. Check the console/terminal for details.")
+        st.session_state.pop("fargate_df", None)
+
+
 def run_aws_scan(region: Optional[str] | List[str] | None = None) -> pd.DataFrame:
     """
     Run AWS scan for specified region(s) or globally.
@@ -207,6 +296,10 @@ def run_aws_scan(region: Optional[str] | List[str] | None = None) -> pd.DataFram
                     # Scan Lambda functions (within same credential context)
                     with st.spinner("Scanning Lambda functions..."):
                         _scan_lambda_functions(region, ec2_df)
+                    
+                    # Scan Fargate tasks (within same credential context)
+                    with st.spinner("Scanning Fargate tasks..."):
+                        _scan_fargate_tasks(region, ec2_df)
             else:
                 # Use environment credentials directly
                 # If we have explicit credentials, wrap in context to keep them available for Lambda scan

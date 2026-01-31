@@ -538,14 +538,14 @@ def generate_insights(df: pd.DataFrame, metrics: dict) -> list[str]:
     return insights
 
 
-# Page layout
-st.set_page_config(page_title="EC2 vs Savings Plans Alignment", page_icon="🔗", layout="wide")
-
-render_page_header(
-    title="EC2 vs Savings Plans Alignment",
-    subtitle="Consolidated view of how EC2 instance usage aligns with Savings Plans commitments, ensuring optimization is not just apparent but truly effective.",
-    icon="🔗",
-)
+# Page layout (skip when embedded in Optimization > Commitment tab)
+if not os.environ.get("CWT_AS_TAB"):
+    st.set_page_config(page_title="EC2 vs Savings Plans Alignment", page_icon="🔗", layout="wide")
+    render_page_header(
+        title="EC2 vs Savings Plans Alignment",
+        subtitle="Consolidated view of how EC2 instance usage aligns with Savings Plans commitments, ensuring optimization is not just apparent but truly effective.",
+        icon="🔗",
+    )
 
 alignment_df, is_demo = load_alignment_data()
 

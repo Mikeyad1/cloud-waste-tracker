@@ -246,6 +246,10 @@ if auto_scan and st.session_state["ec2_df"].empty:
         ec2_df = run_live_scans(region=None)
         st.session_state["ec2_df"] = ec2_df
 
-
+# Default home: redirect to Overview so the app opens on the Overview page
+try:
+    st.switch_page("pages/1_Overview.py")
+except Exception:
+    pass  # If switch_page not available (older Streamlit), show header only
 
 

@@ -262,14 +262,14 @@ def load_savings_plan_data() -> Tuple[pd.DataFrame, dict, pd.DataFrame, pd.DataF
     return plans_df.copy(), summary, util_history_df.copy(), coverage_history_df.copy(), False
 
 
-# Page layout
-st.set_page_config(page_title="Savings Plans", page_icon="💰", layout="wide")
-
-render_page_header(
-    title="Savings Plans",
-    subtitle="Track spend coverage, utilization trends, and optimization opportunities for AWS Savings Plans.",
-    icon="💰",
-)
+# Page layout (skip when embedded in Optimization > Commitment tab)
+if not os.environ.get("CWT_AS_TAB"):
+    st.set_page_config(page_title="Savings Plans", page_icon="💰", layout="wide")
+    render_page_header(
+        title="Savings Plans",
+        subtitle="Track spend coverage, utilization trends, and optimization opportunities for AWS Savings Plans.",
+        icon="💰",
+    )
 
 plans_df, summary, util_history_df, coverage_history_df, is_demo = load_savings_plan_data()
 

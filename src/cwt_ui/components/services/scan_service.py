@@ -213,6 +213,15 @@ def run_aws_scan(region: Optional[str] | List[str] | None = None) -> pd.DataFram
     
     with st.spinner(scan_text):
         try:
+            # Store previous metrics for "vs last scan" on Overview and Spend
+            st.session_state["previous_optimization_potential"] = st.session_state.get("optimization_potential", 0)
+            st.session_state["previous_action_count"] = st.session_state.get("action_count", 0)
+            try:
+                from cwt_ui.services.spend_aggregate import get_spend_from_scan
+                prev_total, _ = get_spend_from_scan()
+                st.session_state["previous_spend_total"] = float(prev_total or 0)
+            except Exception:
+                st.session_state["previous_spend_total"] = None
             # Import the scans service
             try:
                 from cwt_ui.services.enhanced_scans import run_all_scans
@@ -283,6 +292,7 @@ def run_aws_scan(region: Optional[str] | List[str] | None = None) -> pd.DataFram
                     # Update session state
                     st.session_state["ec2_df"] = ec2_df
                     st.session_state["last_scan_at"] = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+                    st.session_state["data_source"] = "real"
 
                     # Fetch Savings Plans data
                     sp_df, sp_summary, sp_util_trend, sp_coverage_trend = fetch_savings_plan_utilization(None)
@@ -311,6 +321,7 @@ def run_aws_scan(region: Optional[str] | List[str] | None = None) -> pd.DataFram
                         # Update session state
                         st.session_state["ec2_df"] = ec2_df
                         st.session_state["last_scan_at"] = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+                        st.session_state["data_source"] = "real"
 
                         # Fetch Savings Plans data
                         sp_df, sp_summary, sp_util_trend, sp_coverage_trend = fetch_savings_plan_utilization(None)
@@ -332,6 +343,7 @@ def run_aws_scan(region: Optional[str] | List[str] | None = None) -> pd.DataFram
                     # Update session state
                     st.session_state["ec2_df"] = ec2_df
                     st.session_state["last_scan_at"] = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+                    st.session_state["data_source"] = "real"
 
                     # Fetch Savings Plans data
                     sp_df, sp_summary, sp_util_trend, sp_coverage_trend = fetch_savings_plan_utilization(
@@ -350,6 +362,9 @@ def run_aws_scan(region: Optional[str] | List[str] | None = None) -> pd.DataFram
             # Clear legacy keys if present
             st.session_state.pop("savings_plans_df", None)
             st.session_state.pop("savings_plans_summary", None)
+            # Clear synthetic-only data (no real scanners yet for Storage, Data Transfer, Databases)
+            for k in ["storage_df", "data_transfer_df", "databases_df"]:
+                st.session_state.pop(k, None)
             
             # Compute EC2 vs SP alignment if both EC2 and SP data exist
             if not ec2_df.empty and not sp_df.empty:
@@ -374,7 +389,15 @@ def run_aws_scan(region: Optional[str] | List[str] | None = None) -> pd.DataFram
                 except Exception as e:
                     print(f"Warning: Failed to compute EC2-SP alignment: {e}")
                     st.session_state.pop("EC2_SP_ALIGNMENT_DF", None)
-            
+
+            # Update optimization metrics for Overview "vs last scan"
+            _ec2 = st.session_state.get("ec2_df", pd.DataFrame())
+            if _ec2 is not None and not _ec2.empty:
+                from cwt_ui.services.spend_aggregate import get_optimization_metrics
+                _opt, _act = get_optimization_metrics(_ec2)
+                st.session_state["optimization_potential"] = _opt
+                st.session_state["action_count"] = _act
+
             # Show success message with region info
             if isinstance(region, list):
                 st.success(f"✅ Scan complete! Found resources in {len(region)} regions: {', '.join(region)}")

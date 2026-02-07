@@ -7,12 +7,21 @@ import streamlit as st
 
 def get_spend_from_scan() -> tuple[float, pd.DataFrame]:
     """
-    Build spend total and by-service/region from session state (ec2_df, SP data).
+    Build spend total and by-service/region from session state.
+
+    When data_source is "synthetic", returns full service list (EC2, S3, Data Transfer, etc.)
+    from synthetic_data.get_synthetic_spend(). Otherwise uses ec2_df + SP data only.
 
     Returns:
-        (total_usd, df) where df has columns: service, region, amount_usd.
+        (total_usd, df) where df has columns: service, region, amount_usd[, category].
         total_usd is the sum of amount_usd. region may be "—" for service-level rows.
     """
+    if st.session_state.get("data_source") == "synthetic":
+        try:
+            from cwt_ui.services.synthetic_data import get_synthetic_spend
+            return get_synthetic_spend()
+        except Exception:
+            pass  # fall through to scan-derived
     rows: list[dict] = []
     total = 0.0
 
@@ -39,9 +48,9 @@ def get_spend_from_scan() -> tuple[float, pd.DataFrame]:
                 ).reset_index()
                 by_region.columns = ["region", "amount_usd"]
                 for _, row in by_region.iterrows():
-                    rows.append({"service": "EC2", "region": str(row["region"]), "amount_usd": float(row["amount_usd"])})
+                    rows.append({"service": "EC2", "region": str(row["region"]), "amount_usd": float(row["amount_usd"]), "category": "Compute"})
             else:
-                rows.append({"service": "EC2", "region": "—", "amount_usd": float(total_ec2)})
+                rows.append({"service": "EC2", "region": "—", "amount_usd": float(total_ec2), "category": "Compute"})
 
     # Savings Plans: from coverage trend (covered + on-demand) or summary
     sp_coverage = st.session_state.get("SP_COVERAGE_TREND", pd.DataFrame())
@@ -59,8 +68,33 @@ def get_spend_from_scan() -> tuple[float, pd.DataFrame]:
         if covered > 0 or ondemand > 0:
             total_sp = covered + ondemand
             total += total_sp
-            rows.append({"service": "Savings Plans (covered)", "region": "—", "amount_usd": float(covered)})
-            rows.append({"service": "Savings Plans (on-demand)", "region": "—", "amount_usd": float(ondemand)})
+            rows.append({"service": "Savings Plans (covered)", "region": "—", "amount_usd": float(covered), "category": "Commitment"})
+            rows.append({"service": "Savings Plans (on-demand)", "region": "—", "amount_usd": float(ondemand), "category": "Commitment"})
 
-    df = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["service", "region", "amount_usd"])
+    df = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["service", "region", "amount_usd", "category"])
     return total, df
+
+
+def get_optimization_metrics(ec2_df: pd.DataFrame) -> tuple[float, int]:
+    """
+    Compute optimization potential (sum of potential_savings_usd) and action count
+    (recommendations that are not OK / No action) from EC2 dataframe.
+    Used by Overview and by scan/synthetic load to store previous vs current.
+    """
+    if ec2_df is None or ec2_df.empty:
+        return 0.0, 0
+    potential = 0.0
+    for col in ["potential_savings_usd", "Potential Savings ($)", "potential_savings"]:
+        if col in ec2_df.columns:
+            potential = float(pd.to_numeric(ec2_df[col], errors="coerce").fillna(0).sum())
+            break
+    rec_col = None
+    for col in ["recommendation", "Recommendation"]:
+        if col in ec2_df.columns:
+            rec_col = col
+            break
+    action_count = 0
+    if rec_col:
+        rec_upper = ec2_df[rec_col].astype(str).str.upper()
+        action_count = int((~rec_upper.str.contains("OK|NO ACTION", na=True)).sum())
+    return potential, action_count

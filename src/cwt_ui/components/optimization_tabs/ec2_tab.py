@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from cwt_ui.components.kpi_card import render_kpi
+from cwt_ui.components.ui.overview_cards import render_sec_card
 from cwt_ui.utils.money import format_usd
 
 
@@ -85,11 +85,17 @@ def render_ec2_tab() -> None:
     if ec2_df["scanned_at_ts"].notna().any():
         min_date = ec2_df["scanned_at_ts"].min().date()
         max_date = ec2_df["scanned_at_ts"].max().date()
-        default_start = max_date - timedelta(days=30)
+        default_start = max(min_date, max_date - timedelta(days=30))
         default_end = max_date
-        date_range = st.date_input(
-            "Scan date range", value=(default_start, default_end), min_value=min_date, max_value=max_date, key="ec2_tab_dates"
-        )
+        if min_date == max_date:
+            date_range = st.date_input(
+                "Scan date", value=max_date, min_value=min_date, max_value=max_date, key="ec2_tab_dates"
+            )
+            date_range = (date_range, date_range) if date_range else None
+        else:
+            date_range = st.date_input(
+                "Scan date range", value=(default_start, default_end), min_value=min_date, max_value=max_date, key="ec2_tab_dates"
+            )
     filtered = ec2_df.copy()
     if selected_regions:
         filtered = filtered[filtered["region"].isin(selected_regions)]
@@ -124,13 +130,13 @@ def render_ec2_tab() -> None:
     idle_cost = filtered.loc[filtered["idle_score"] >= 70, "monthly_cost_usd"].sum()
     kpi_cols = st.columns(4)
     with kpi_cols[0]:
-        render_kpi("Total EC2 Instances", f"{total_instances:,}", help_text="Number of EC2 instances after filters.")
+        render_sec_card("Total EC2 Instances", f"{total_instances:,}", "Number of EC2 instances after filters.")
     with kpi_cols[1]:
-        render_kpi("Monthly EC2 Spend", format_usd(monthly_spend), help_text="Approximate monthly cost.")
+        render_sec_card("Monthly EC2 Spend", format_usd(monthly_spend), "Approximate monthly cost.")
     with kpi_cols[2]:
-        render_kpi("% Covered by Savings Plans", f"{coverage_pct:.1f}%", help_text="SP coverage.")
+        render_sec_card("% Covered by Savings Plans", f"{coverage_pct:.1f}%", "SP coverage.")
     with kpi_cols[3]:
-        render_kpi("Estimated Idle/Waste Cost", format_usd(idle_cost), help_text="Monthly cost from highly idle.")
+        render_sec_card("Estimated Idle/Waste Cost", format_usd(idle_cost), "Monthly cost from highly idle.")
     table = pd.DataFrame(
         {
             "Instance ID": filtered["instance_id"],

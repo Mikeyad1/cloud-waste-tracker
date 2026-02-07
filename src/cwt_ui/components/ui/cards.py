@@ -6,7 +6,7 @@ def metric(label: str, value, help_text: str | None = None) -> None:
     מציג כרטיס KPI אחד עם label, value וטקסט עזרה אופציונלי.
     עטיפה ל-st.metric כדי לאחד שימוש.
     """
-    st.metric(label, value, help=help_text)
+    st.metric(label, value)
 
 
 def three_metrics(metrics: list[tuple[str, str, str | None]]):
@@ -17,7 +17,7 @@ def three_metrics(metrics: list[tuple[str, str, str | None]]):
     cols = st.columns(len(metrics))
     for col, (label, value, help_text) in zip(cols, metrics):
         with col:
-            st.metric(label, value, help=help_text)
+            st.metric(label, value)
 
 
 def kpi_card(label: str, value, delta: str | None = None, delta_color: str = "normal"):

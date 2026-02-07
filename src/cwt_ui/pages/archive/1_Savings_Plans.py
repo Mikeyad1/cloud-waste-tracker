@@ -325,13 +325,12 @@ with filter_cols[1]:
         default=available_types,
     )
 
-date_source = pd.concat(
-    [
-        pd.to_datetime(util_history_df["date"], errors="coerce"),
-        pd.to_datetime(coverage_history_df["date"], errors="coerce"),
-    ],
-    ignore_index=True,
-).dropna()
+date_parts = []
+if "date" in util_history_df.columns:
+    date_parts.append(pd.to_datetime(util_history_df["date"], errors="coerce"))
+if "date" in coverage_history_df.columns:
+    date_parts.append(pd.to_datetime(coverage_history_df["date"], errors="coerce"))
+date_source = pd.concat(date_parts, ignore_index=True).dropna() if date_parts else pd.Series(dtype="datetime64[ns]")
 
 if date_source.empty:
     default_start = date.today() - timedelta(days=DEFAULT_LOOKBACK_DAYS)
@@ -355,45 +354,55 @@ if selected_regions:
 if selected_types:
     filtered_plans = filtered_plans[filtered_plans["Type"].isin(selected_types)]
 
+# Util history: merge with plans only when per-ARN data exists; else use aggregated data
 filtered_util_history = util_history_df.copy()
 if not filtered_util_history.empty:
-    filtered_util_history = filtered_util_history.merge(
-        plans_df[["Savings Plan Arn", "Region", "Type"]],
-        how="left",
-        left_on="savings_plan_arn",
-        right_on="Savings Plan Arn",
-    )
-    if selected_regions:
-        filtered_util_history = filtered_util_history[filtered_util_history["Region"].isin(selected_regions)]
-    if selected_types:
-        filtered_util_history = filtered_util_history[filtered_util_history["Type"].isin(selected_types)]
-    filtered_util_history = filtered_util_history[
-        (pd.to_datetime(filtered_util_history["date"]) >= pd.to_datetime(start_date))
-        & (pd.to_datetime(filtered_util_history["date"]) <= pd.to_datetime(end_date))
-    ]
-    filtered_util_history = filtered_util_history[
-        ["date", "savings_plan_arn", "utilization_pct", "used_per_hour", "commitment_per_hour"]
-    ]
+    has_util_arn = "savings_plan_arn" in filtered_util_history.columns
+    has_plans_arn = not plans_df.empty and "Savings Plan Arn" in plans_df.columns
+    if has_util_arn and has_plans_arn:
+        filtered_util_history = filtered_util_history.merge(
+            plans_df[["Savings Plan Arn", "Region", "Type"]],
+            how="left",
+            left_on="savings_plan_arn",
+            right_on="Savings Plan Arn",
+        )
+        if selected_regions:
+            filtered_util_history = filtered_util_history[filtered_util_history["Region"].isin(selected_regions)]
+        if selected_types:
+            filtered_util_history = filtered_util_history[filtered_util_history["Type"].isin(selected_types)]
+    if "date" in filtered_util_history.columns:
+        filtered_util_history = filtered_util_history[
+            (pd.to_datetime(filtered_util_history["date"], errors="coerce") >= pd.to_datetime(start_date))
+            & (pd.to_datetime(filtered_util_history["date"], errors="coerce") <= pd.to_datetime(end_date))
+        ]
+    util_cols = [c for c in ["date", "savings_plan_arn", "utilization_pct", "used_per_hour", "commitment_per_hour"] if c in filtered_util_history.columns]
+    if util_cols:
+        filtered_util_history = filtered_util_history[util_cols]
 
+# Coverage history: same defensive handling
 filtered_coverage_history = coverage_history_df.copy()
 if not filtered_coverage_history.empty:
-    filtered_coverage_history = filtered_coverage_history.merge(
-        plans_df[["Savings Plan Arn", "Region", "Type"]],
-        how="left",
-        left_on="savings_plan_arn",
-        right_on="Savings Plan Arn",
-    )
-    if selected_regions:
-        filtered_coverage_history = filtered_coverage_history[filtered_coverage_history["Region"].isin(selected_regions)]
-    if selected_types:
-        filtered_coverage_history = filtered_coverage_history[filtered_coverage_history["Type"].isin(selected_types)]
-    filtered_coverage_history = filtered_coverage_history[
-        (pd.to_datetime(filtered_coverage_history["date"]) >= pd.to_datetime(start_date))
-        & (pd.to_datetime(filtered_coverage_history["date"]) <= pd.to_datetime(end_date))
-    ]
-    filtered_coverage_history = filtered_coverage_history[
-        ["date", "savings_plan_arn", "coverage_pct", "covered_spend", "ondemand_spend"]
-    ]
+    has_cov_arn = "savings_plan_arn" in filtered_coverage_history.columns
+    has_plans_arn = not plans_df.empty and "Savings Plan Arn" in plans_df.columns
+    if has_cov_arn and has_plans_arn:
+        filtered_coverage_history = filtered_coverage_history.merge(
+            plans_df[["Savings Plan Arn", "Region", "Type"]],
+            how="left",
+            left_on="savings_plan_arn",
+            right_on="Savings Plan Arn",
+        )
+        if selected_regions:
+            filtered_coverage_history = filtered_coverage_history[filtered_coverage_history["Region"].isin(selected_regions)]
+        if selected_types:
+            filtered_coverage_history = filtered_coverage_history[filtered_coverage_history["Type"].isin(selected_types)]
+    if "date" in filtered_coverage_history.columns:
+        filtered_coverage_history = filtered_coverage_history[
+            (pd.to_datetime(filtered_coverage_history["date"], errors="coerce") >= pd.to_datetime(start_date))
+            & (pd.to_datetime(filtered_coverage_history["date"], errors="coerce") <= pd.to_datetime(end_date))
+        ]
+    cov_cols = [c for c in ["date", "savings_plan_arn", "coverage_pct", "covered_spend", "ondemand_spend"] if c in filtered_coverage_history.columns]
+    if cov_cols:
+        filtered_coverage_history = filtered_coverage_history[cov_cols]
 
 util_trend_df = compute_utilization_trend(filtered_util_history)
 coverage_trend_df = compute_coverage_trend(filtered_coverage_history)
@@ -432,20 +441,21 @@ with kpi_col4:
     )
 
 st.markdown("### Savings Plans Inventory")
-table_df = filtered_plans[
-    [
-        "SP ID",
-        "Type",
-        "Region",
-        "Commitment ($/hr)",
-        "Actual Usage ($/hr)",
-        "Utilization %",
-        "Coverage %",
-        "Unused Commitment ($/hr)",
-        "Forecast Utilization %",
-        "Expiration Date",
-    ]
-].copy()
+table_cols = [
+    "SP ID",
+    "Type",
+    "Region",
+    "Commitment ($/hr)",
+    "Actual Usage ($/hr)",
+    "Utilization %",
+    "Coverage %",
+    "Unused Commitment ($/hr)",
+    "Forecast Utilization %",
+    "Expiration Date",
+]
+if "Covers" in filtered_plans.columns:
+    table_cols.insert(3, "Covers")  # After Type
+table_df = filtered_plans[[c for c in table_cols if c in filtered_plans.columns]].copy()
 
 table_df["Commitment ($/hr)"] = table_df["Commitment ($/hr)"].apply(lambda x: format_usd(x, 2))
 table_df["Actual Usage ($/hr)"] = table_df["Actual Usage ($/hr)"].apply(lambda x: format_usd(x, 2))

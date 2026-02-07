@@ -4,6 +4,24 @@ Honest build plan: what comes first, what comes next, realistic timing, and who 
 
 ---
 
+## 0. Product foundation vs. $100M outcome
+
+**This plan builds the product foundation of a $100M FinOps platform.** It is not yet the full $100M plan.
+
+- **What this plan delivers:** A coherent, shippable multi-cloud FinOps product (Spend → Optimization → Budgets → Governance → Chargeback) that mid-market companies will pay for.
+- **What’s required for $100M:** The product is necessary but not sufficient. You also need:
+  - **The wedge** — How you get into accounts (e.g. optimization-first, spend visibility, governance)
+  - **Pricing model** — Scales with cloud spend; repeatable ROI story
+  - **Distribution** — PLG or sales-led; who you sell to (FinOps, CFO, eng)
+  - **Enterprise expansion** — Governance depth, integrations, compliance
+  - **“Why us, why now”** — Narrative that differentiates and creates urgency
+
+Those are business/GTM decisions, not product phases. This doc focuses on product; a separate GTM plan should define the wedge, pricing, and distribution.
+
+**Why the sequencing works:** Foundation → Visibility → Controls → Governance → Multi-cloud. This mirrors how successful FinOps platforms (CloudHealth, Cloudability, ProsperOps, Zesty) evolved and how customers adopt: they need to see spend before they can budget, optimize, or govern. You’re building the minimum viable FinOps platform in the right order.
+
+---
+
 ## 1. Steps (what comes first, what next)
 
 ### Phase 1 — Restructure (shell only)
@@ -36,6 +54,8 @@ Honest build plan: what comes first, what comes next, realistic timing, and who 
 
 ### Phase 3 — Spend (single cloud first)
 **Goal:** One source of truth for “where money went.”
+
+> **⚠️ Spend is the real monster.** CUR ingestion, normalization, grouping, tagging, and reconciliation is where most FinOps startups die. If Spend isn’t rock-solid, everything downstream (budgets, chargeback, governance) becomes unreliable. The plan acknowledges this; treat Phase 3 as the highest-risk phase and allocate time and focus accordingly.
 
 | Step | What | Order |
 |------|------|--------|
@@ -74,6 +94,13 @@ Honest build plan: what comes first, what comes next, realistic timing, and who 
 
 **Outcome:** Governance is visible; you can add approval workflows later.
 
+**Governance evolution (enterprise ACV):** Phase 5 is a start, not enough to command enterprise dollars. On the roadmap for later:
+- Auto-remediation (e.g. stop idle instance, resize)
+- Exceptions workflow (request → approve/reject with comment)
+- Audit trails (who changed what policy, who approved what, when)
+- Policy-as-code (versioned, reviewable rules)
+- Integrations: Slack, Jira, ServiceNow for alerts and ticketing
+
 ---
 
 ### Phase 6 — Chargeback
@@ -91,13 +118,16 @@ Honest build plan: what comes first, what comes next, realistic timing, and who 
 ### Phase 7 — Multi-cloud (second cloud)
 **Goal:** At least one more cloud (GCP or Azure) in Setup, Spend, Overview.
 
+> **Multi-cloud is not a feature — it’s a multiplier.** Just adding Azure/GCP spend ingestion doesn’t unlock the TAM. The real value is in **cross-cloud abstractions**: unified tagging, unified budgets, unified governance, unified optimization. Phase 7 gets ingestion in place; the next step is to make those abstractions work across clouds.
+
 | Step | What | Order |
 |------|------|--------|
 | 7.1 | Setup: add GCP or Azure (auth, project/subscription, sync). | First |
 | 7.2 | Spend ingestion for that cloud (e.g. GCP Billing API, Azure Cost Management). | Next |
 | 7.3 | Overview + Spend: “by cloud” = AWS + other. Optimization for that cloud (e.g. GCE, Cloud Functions) can come later. | Next |
+| 7.4 | *(Post-Phase 7)* Unified tagging, budgets, and governance across clouds — one view, one policy, one budget. | Later |
 
-**Outcome:** Product is genuinely multi-cloud for spend (and optionally optimization).
+**Outcome:** Product is genuinely multi-cloud for spend (and optionally optimization). Full cross-cloud abstractions follow.
 
 ---
 
@@ -107,7 +137,7 @@ Honest build plan: what comes first, what comes next, realistic timing, and who 
 |-------|------|--------------------------------------|
 | 1 | Restructure (shell, 8 pages, move Optimization) | **1–2 weeks** |
 | 2 | Overview + existing data | **~1 week** |
-| 3 | Spend (one cloud, one data source) | **2–4 weeks** (depends on data source and your access) |
+| 3 | Spend (one cloud, one data source) | **2–6 weeks** (CUR ingestion is hardest; Cost Explorer API is faster. Plan for the worst.) |
 | 4 | Budgets & Forecast | **1–2 weeks** (after Spend exists) |
 | 5 | Governance (simple) | **1–2 weeks** |
 | 6 | Chargeback | **~1 week** (after Spend + allocation rules) |
@@ -157,11 +187,31 @@ So: **it’s not too good to be true—it’s a lot of work, in order, with clea
 
 ---
 
-## 6. What to do next (concrete)
+## 6. What’s missing for $100M (GTM / business)
 
-1. **You:** Confirm Phase 1 (restructure) as the next goal: 8 pages, Optimization as tabs, Setup renamed, Overview as home.
-2. **Me:** Implement Phase 1 (page files, move content into Optimization, sidebar, default to Overview).
-3. **You:** After Phase 1, decide: spend data source for Phase 3 (so we can design Spend and hook Overview).
-4. **Me:** Implement Phase 2 (Overview KPIs from existing data + links).
+The product phases above are necessary but not sufficient for a $100M outcome. These pieces live outside the build plan and need to be defined in parallel or shortly after product v1:
 
-If you say “go” on Phase 1, we start there; then we do Phase 2, then we tackle Spend once you’ve decided the data source.
+| Gap | What it means | Who owns it |
+|-----|---------------|-------------|
+| **The wedge** | How you get into accounts. Optimization-first? Spend visibility? Governance? The wedge determines positioning and early feature priority. | You |
+| **Pricing model** | Typically % of cloud spend or seat-based. Must scale with value and be easy to justify. | You |
+| **Distribution** | PLG (self-serve, free tier, upgrade) vs. sales-led (demos, contracts). Affects product UX and feature set. | You |
+| **Enterprise expansion** | Governance depth (Phase 5 evolution), integrations, compliance, SLAs. This is where ACV grows. | You + product |
+| **“Why us, why now”** | Narrative that differentiates and creates urgency. Tied to wedge and market timing. | You |
+
+**Recommendation:** Define the wedge and pricing model before or during Phase 3. That will inform which features to prioritize and how to position the product.
+
+---
+
+## 7. What to do next (concrete)
+
+**Phases 1–2:** Done (restructure, Overview with KPIs and recommendations).
+
+**Next:**
+
+1. **You:** Decide spend data source for Phase 3 (Cost Explorer API, CUR, CSV, partner). This unblocks Spend design.
+2. **You:** Define the wedge and pricing model (see §6). Informs feature priority and positioning.
+3. **Me:** Implement Phase 3 (Spend page, ingestion, filters, export). Treat as highest-risk phase.
+4. **You:** After Spend is stable, decide: Budgets next, or Governance, or Chargeback. All depend on Spend.
+
+If Spend data source is chosen, Phase 3 can start. In parallel, a GTM doc (wedge, pricing, distribution) will sharpen the path to revenue.

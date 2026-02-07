@@ -32,6 +32,18 @@ def _run_page_as_tab(script_name: str) -> None:
 
 
 def render_commitment_tab() -> None:
+    with st.expander("📋 Savings Plans types — what covers what", expanded=True):
+        st.markdown("""
+        AWS offers two main Savings Plans that affect compute pricing:
+
+        | Type | Coverage |
+        |------|----------|
+        | **EC2 Instance SP** | EC2 instances only |
+        | **Compute SP** | EC2, Fargate, Lambda |
+
+        See **Savings Plans** below for commitment details and utilization.  
+        For SP coverage by product, use the **Compute (EC2)**, **Containers (Fargate)**, and **Serverless (Lambda)** tabs.
+        """)
     sub_tab1, sub_tab2 = st.tabs(["Savings Plans", "EC2 vs SP Alignment"])
     with sub_tab1:
         st.markdown("##### Savings Plans — coverage and utilization")

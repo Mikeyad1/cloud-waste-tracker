@@ -4,11 +4,14 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+from cwt_ui.components.ui.overview_cards import render_sec_card
+from cwt_ui.utils.money import format_usd
+
 
 def render_fargate_tab() -> None:
     fargate_df = st.session_state.get("fargate_df", pd.DataFrame())
     if fargate_df is None or fargate_df.empty:
-        st.info("Run a scan from **Setup** to load Fargate task data.")
+        st.info("Run a scan from **Setup** or load **synthetic data** from Overview to load Fargate task data.")
         return
     st.markdown("#### Filters")
     col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
@@ -43,21 +46,37 @@ def render_fargate_tab() -> None:
     total_tasks = len(filtered)
     running_tasks = len(filtered[filtered["status"] == "RUNNING"])
     total_memory_gb = filtered["memory_mb"].sum() / 1024
-    kpi_col1, kpi_col2, kpi_col3, kpi_col4 = st.columns(4)
+    monthly_spend = filtered["monthly_cost_usd"].sum() if "monthly_cost_usd" in filtered.columns else 0.0
+    if "billing_type" in filtered.columns and filtered["billing_type"].notna().any():
+        covered = filtered["billing_type"].str.contains("SP", case=False, na=False)
+        coverage_pct = (covered.sum() / total_tasks) * 100 if total_tasks else 0.0
+    else:
+        coverage_pct = 0.0
+    potential_savings = filtered["potential_savings_usd"].sum() if "potential_savings_usd" in filtered.columns else 0.0
+    kpi_col1, kpi_col2, kpi_col3, kpi_col4, kpi_col5 = st.columns(5)
     with kpi_col1:
-        st.metric("Total Tasks", f"{total_tasks:,}")
+        render_sec_card("Total Tasks", f"{total_tasks:,}", "Fargate tasks after filters.")
     with kpi_col2:
-        st.metric("Running Tasks", f"{running_tasks:,}")
+        render_sec_card("Running Tasks", f"{running_tasks:,}", "Currently active tasks.")
     with kpi_col3:
-        st.metric("Clusters", filtered["cluster_name"].nunique())
+        render_sec_card("Monthly Spend", format_usd(monthly_spend), "Approximate monthly cost.")
     with kpi_col4:
-        st.metric("Total Memory", f"{total_memory_gb:.1f} GB")
+        render_sec_card("% Covered by SP", f"{coverage_pct:.1f}%", "Compute SP covers Fargate.")
+    with kpi_col5:
+        render_sec_card("Potential Savings", format_usd(potential_savings), "From rightsizing recommendations.")
     st.markdown("#### Fargate Tasks Inventory")
-    table_df = filtered[
-        ["service_name", "cluster_name", "task_definition_family", "region", "cpu", "memory_mb", "platform_version", "status", "started_at"]
-    ].copy()
-    table_df.columns = ["Service Name", "Cluster", "Task Definition", "Region", "CPU", "Memory (MB)", "Platform Version", "Status", "Started At"]
+    base_cols = ["service_name", "cluster_name", "task_definition_family", "region", "cpu", "memory_mb", "platform_version", "status", "started_at"]
+    extra_cols = [c for c in ["monthly_cost_usd", "billing_type", "recommendation", "potential_savings_usd"] if c in filtered.columns]
+    table_df = filtered[base_cols + extra_cols].copy()
+    table_df.columns = ["Service Name", "Cluster", "Task Definition", "Region", "CPU", "Memory (MB)", "Platform Version", "Status", "Started At"] + (
+        ["Monthly Cost ($)", "Billing Type", "Recommendation", "Potential Savings ($)"] if extra_cols else []
+    )
     if "Started At" in table_df.columns:
         table_df["Started At"] = pd.to_datetime(table_df["Started At"], errors="coerce").dt.strftime("%Y-%m-%d %H:%M:%S")
         table_df["Started At"] = table_df["Started At"].fillna("—")
-    st.dataframe(table_df, use_container_width=True, hide_index=True)
+    col_config = {}
+    if "Monthly Cost ($)" in table_df.columns:
+        col_config["Monthly Cost ($)"] = st.column_config.NumberColumn("Monthly Cost ($)", format="$%.2f")
+    if "Potential Savings ($)" in table_df.columns:
+        col_config["Potential Savings ($)"] = st.column_config.NumberColumn("Potential Savings ($)", format="$%.2f")
+    st.dataframe(table_df, use_container_width=True, hide_index=True, column_config=col_config or None)

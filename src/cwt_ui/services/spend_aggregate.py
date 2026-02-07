@@ -5,21 +5,22 @@ import pandas as pd
 import streamlit as st
 
 
-def get_spend_from_scan() -> tuple[float, pd.DataFrame]:
+def get_spend_from_scan(period: str = "this_month") -> tuple[float, pd.DataFrame]:
     """
     Build spend total and by-service/region from session state.
 
     When data_source is "synthetic", returns full service list (EC2, S3, Data Transfer, etc.)
     from synthetic_data.get_synthetic_spend(). Otherwise uses ec2_df + SP data only.
+    period: "this_month" | "last_month" (last_month only applies to synthetic).
 
     Returns:
-        (total_usd, df) where df has columns: service, region, amount_usd[, category].
+        (total_usd, df) where df has columns: service, region, amount_usd[, category, environment, team, cost_center, linked_account_id, linked_account_name].
         total_usd is the sum of amount_usd. region may be "—" for service-level rows.
     """
     if st.session_state.get("data_source") == "synthetic":
         try:
             from cwt_ui.services.synthetic_data import get_synthetic_spend
-            return get_synthetic_spend()
+            return get_synthetic_spend(period=period, include_tags=True)
         except Exception:
             pass  # fall through to scan-derived
     rows: list[dict] = []
@@ -73,6 +74,22 @@ def get_spend_from_scan() -> tuple[float, pd.DataFrame]:
 
     df = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["service", "region", "amount_usd", "category"])
     return total, df
+
+
+def get_spend_mom_for_synthetic() -> tuple[float, float] | None:
+    """
+    For synthetic data only: returns (this_month_total, last_month_total) for MoM comparison.
+    Returns None if not synthetic.
+    """
+    if st.session_state.get("data_source") != "synthetic":
+        return None
+    try:
+        from cwt_ui.services.synthetic_data import get_synthetic_spend
+        this_total, _ = get_synthetic_spend(period="this_month", include_tags=True)
+        last_total, _ = get_synthetic_spend(period="last_month", include_tags=True)
+        return (this_total, last_total)
+    except Exception:
+        return None
 
 
 def get_optimization_metrics(ec2_df: pd.DataFrame) -> tuple[float, int]:

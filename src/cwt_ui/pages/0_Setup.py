@@ -29,6 +29,25 @@ st.markdown("### AWS")
 render_aws_setup_content()
 
 st.markdown("---")
+st.markdown("### Connect real spend data")
+with st.expander("Cost Explorer API vs CUR — what we support", expanded=False):
+    st.markdown("""
+    **Where does spend data come from?** Today, scans pull EC2 and Savings Plans. For full spend visibility
+    (S3, RDS, Lambda, Data Transfer, etc.), you need one of these:
+
+    | Source | What it provides | Status |
+    |--------|------------------|--------|
+    | **Cost Explorer API** | Hourly/daily spend by service, region, tag. Real-time. | Planned |
+    | **CUR (Cost and Usage Report)** | Detailed line items in S3. Best for chargeback, custom analysis. | Planned |
+    | **Cost Explorer CSV export** | Manual upload for quick start. | Planned |
+
+    **CUR** is the gold standard for FinOps: granular line items, cost allocation tags, usage types.
+    **Cost Explorer API** is faster to connect but less granular. We will support both; CUR unlocks
+    chargeback, budgets, and full optimization across all services.
+    """)
+    st.caption("Set up CUR in AWS Billing → Cost & Usage Reports. Enable cost allocation tags (Environment, Team, CostCenter) for best results.")
+
+st.markdown("---")
 st.markdown("### Other clouds")
 with st.expander("GCP / Azure", expanded=False):
     st.info("**Coming later.** Google Cloud and Microsoft Azure connections will be added here.")

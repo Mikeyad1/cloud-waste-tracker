@@ -13,7 +13,10 @@ import pandas as pd
 import streamlit as st
 
 from cwt_ui.components.ui.header import render_page_header
-from cwt_ui.services.spend_aggregate import get_spend_from_scan, get_optimization_metrics
+from cwt_ui.services.spend_aggregate import get_spend_from_scan, get_optimization_metrics, get_spend_mom_for_synthetic
+from cwt_ui.services.budgets_service import get_first_budget_consumption
+from cwt_ui.services.chargeback_service import get_chargeback_summary_for_overview
+from cwt_ui.services.governance_service import get_open_violations_count
 from cwt_ui.services.synthetic_data import load_synthetic_data_into_session
 from cwt_ui.utils.money import format_usd
 
@@ -128,6 +131,9 @@ with st.container():
 ec2_df = st.session_state.get("ec2_df", pd.DataFrame())
 last_scan_at = st.session_state.get("last_scan_at", "")
 spend_total_usd, spend_df = get_spend_from_scan()
+mom = get_spend_mom_for_synthetic() if data_source == "synthetic" else None
+budget_kpi = get_first_budget_consumption()
+chargeback_summary = get_chargeback_summary_for_overview()
 
 optimization_potential = st.session_state.get("optimization_potential")
 action_count = st.session_state.get("action_count")
@@ -158,32 +164,53 @@ with hero_col:
         unsafe_allow_html=True,
     )
 
-# Secondary row: 3 equal cards — Spend, Budget, Actions
-col1, col2, col3 = st.columns(3)
+# Secondary row: 4 cards — Spend, Budget, Actions, Open violations
+col1, col2, col3, col4 = st.columns(4)
 with col1:
+    spend_meta = "Full service list" if data_source == "synthetic" else "EC2 + Savings Plans"
+    if mom and data_source == "synthetic":
+        this_total, last_total = mom
+        if last_total and last_total > 0:
+            mom_pct = round((this_total - last_total) / last_total * 100, 1)
+            mom_dir = "↑" if mom_pct > 0 else "↓"
+            spend_meta = f"{spend_meta}. {mom_dir} {abs(mom_pct):.1f}% vs last month"
     st.markdown(
         f'''
         <div class="overview-sec-card">
             <div class="overview-sec-label">Total cloud spend</div>
             <div class="overview-sec-value">{format_usd(spend_total_usd) if spend_total_usd and spend_total_usd > 0 else "—"}</div>
-            <div class="overview-sec-meta">{"Full service list" if data_source == "synthetic" else "EC2 + Savings Plans"} from last scan.</div>
+            <div class="overview-sec-meta">{spend_meta}</div>
         </div>
         ''',
         unsafe_allow_html=True,
     )
     st.caption("From last scan. See **Spend** for breakdown.")
 with col2:
-    st.markdown(
-        '''
-        <div class="overview-sec-card">
-            <div class="overview-sec-label">Budget consumption</div>
-            <div class="overview-sec-value">—</div>
-            <div class="overview-sec-meta">Set monthly or quarterly budgets per account or team.</div>
-        </div>
-        ''',
-        unsafe_allow_html=True,
-    )
-    st.caption("Coming in **Budgets & Forecast**. Set targets and track variance.")
+    if budget_kpi:
+        consumed_pct, consumed, status = budget_kpi
+        status_label = "On track" if status == "on_track" else "At risk" if status == "at_risk" else "Over"
+        st.markdown(
+            f'''
+            <div class="overview-sec-card">
+                <div class="overview-sec-label">Budget consumption (Engineering)</div>
+                <div class="overview-sec-value">{consumed_pct:.0f}%</div>
+                <div class="overview-sec-meta">{format_usd(consumed)} of budget · {status_label}</div>
+            </div>
+            ''',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            '''
+            <div class="overview-sec-card">
+                <div class="overview-sec-label">Budget consumption</div>
+                <div class="overview-sec-value">—</div>
+                <div class="overview-sec-meta">Set monthly or quarterly budgets per account or team.</div>
+            </div>
+            ''',
+            unsafe_allow_html=True,
+        )
+    st.caption("See **Budgets & Forecast** for all budgets." if budget_kpi else "Load synthetic data or set budgets in **Budgets & Forecast**.")
 with col3:
     st.markdown(
         f'''
@@ -196,6 +223,24 @@ with col3:
         unsafe_allow_html=True,
     )
     st.caption("Items needing attention. Review in **Optimization**.")
+with col4:
+    open_violations = get_open_violations_count()
+    st.markdown(
+        f'''
+        <div class="overview-sec-card">
+            <div class="overview-sec-label">Open violations</div>
+            <div class="overview-sec-value">{open_violations if ec2_df is not None and not ec2_df.empty else "—"}</div>
+            <div class="overview-sec-meta">Policy violations. Review and acknowledge in Governance.</div>
+        </div>
+        ''',
+        unsafe_allow_html=True,
+    )
+    try:
+        st.page_link("pages/5_Governance.py", label="Open Governance →", icon="🛡️")
+    except Exception:
+        st.markdown("[Open **Governance** →](pages/5_Governance.py)")
+    st.caption("Review policies and violations.")
+
 
 # Tertiary: Last scan + "What changed since last scan"
 st.markdown('<p class="overview-section">Data & changes</p>', unsafe_allow_html=True)
@@ -257,6 +302,11 @@ if not spend_df.empty and spend_total_usd and spend_total_usd > 0:
     by_service = spend_df.groupby("service", as_index=False)["amount_usd"].sum().sort_values("amount_usd", ascending=False)
     top5 = by_service.head(5)
     top_drivers = " · ".join([f"<strong>{r['service']}</strong> {format_usd(r['amount_usd'])}" for _, r in top5.iterrows()])
+    by_account_html = ""
+    if "linked_account_id" in spend_df.columns and spend_df["linked_account_id"].notna().any():
+        by_account = spend_df.groupby("linked_account_name", as_index=False)["amount_usd"].sum().sort_values("amount_usd", ascending=False)
+        top3_accounts = " · ".join([f"<strong>{r['linked_account_name']}</strong> {format_usd(r['amount_usd'])}" for _, r in by_account.head(3).iterrows()])
+        by_account_html = f'<div class="overview-breakdown-context" style="margin-bottom:8px;"><strong>Spend by linked account:</strong> {top3_accounts}</div>'
 
     if "category" in spend_df.columns and spend_df["category"].notna().any():
         by_cat = spend_df.groupby("category", as_index=False)["amount_usd"].sum().sort_values("amount_usd", ascending=False)
@@ -318,6 +368,7 @@ if not spend_df.empty and spend_total_usd and spend_total_usd > 0:
             <div class="overview-breakdown-title">Total cloud spend</div>
             <div class="overview-breakdown-total">{format_usd(spend_total_usd)}</div>
             <div class="overview-breakdown-context" style="margin-bottom:8px;"><strong>Top cost drivers:</strong> {top_drivers}</div>
+            {by_account_html}
             {bar_html}
             <div class="overview-breakdown-context">{context_html}</div>
         </div>
@@ -335,6 +386,26 @@ else:
         unsafe_allow_html=True,
     )
     st.caption("Load synthetic data or run a scan to see spend by category.")
+
+# ----- Cost by team (chargeback summary) -----
+if chargeback_summary:
+    st.markdown('<p class="overview-section">Cost by team</p>', unsafe_allow_html=True)
+    top_items = " · ".join([f"<strong>{team}</strong> {format_usd(amt)}" for team, amt in chargeback_summary])
+    st.markdown(
+        f'''
+        <div class="overview-breakdown-card">
+            <div class="overview-breakdown-title">Chargeback summary</div>
+            <div class="overview-breakdown-context" style="margin-bottom:8px;">{top_items}</div>
+            <div class="overview-breakdown-context">Allocated by cost allocation tags. Export for finance in Chargeback.</div>
+        </div>
+        ''',
+        unsafe_allow_html=True,
+    )
+    try:
+        st.page_link("pages/6_Chargeback.py", label="Open Chargeback →", icon="📋")
+    except Exception:
+        st.markdown("[Open **Chargeback** →](pages/6_Chargeback.py)")
+    st.caption("See **Chargeback** for full allocation by team, environment, cost center, and export.")
 
 # ----- 2. What should I do: Recommendations -----
 st.markdown('<p class="overview-section">What should I do?</p>', unsafe_allow_html=True)
@@ -449,7 +520,7 @@ else:
 # ----- Quick links -----
 st.markdown('<p class="overview-section">Quick links</p>', unsafe_allow_html=True)
 try:
-    link_col1, link_col2, link_col3, link_col4 = st.columns(4)
+    link_col1, link_col2, link_col3, link_col4, link_col5 = st.columns(5)
     with link_col1:
         st.page_link("pages/2_Spend.py", label="Spend", icon="💰", help="Where money goes.")
     with link_col2:
@@ -458,5 +529,7 @@ try:
         st.page_link("pages/4_Optimization.py", label="Optimization", icon="🔧", help="Waste, rightsizing, recommendations.")
     with link_col4:
         st.page_link("pages/5_Governance.py", label="Governance", icon="🛡️", help="Policies, violations, approvals.")
+    with link_col5:
+        st.page_link("pages/6_Chargeback.py", label="Chargeback", icon="📋", help="Cost by team, environment, cost center.")
 except Exception:
-    st.markdown("- **Spend** · **Budgets & Forecast** · **Optimization** · **Governance**")
+    st.markdown("- **Spend** · **Budgets & Forecast** · **Optimization** · **Governance** · **Chargeback**")

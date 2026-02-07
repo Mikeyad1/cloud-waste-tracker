@@ -22,7 +22,9 @@ TREND_DAYS = 30
 
 REGIONS = ["us-east-1", "us-east-2", "us-west-2", "eu-west-1", "ap-southeast-1"]
 INSTANCE_TYPES = ["t3.small", "t3.medium", "t3.large", "m5.large", "m5.xlarge", "c5.large", "c5.xlarge"]
+GPU_INSTANCE_TYPES = ["p3.2xlarge", "g4dn.xlarge"]  # For governance policy violations
 DEPARTMENTS = ["Engineering", "Platform", "Data", "Product", "Unassigned"]
+SYNTHETIC_ENVIRONMENTS_EC2 = ["prod", "staging", "dev"]
 RUNTIMES = ["python3.11", "python3.12", "nodejs18.x", "nodejs20.x", "java17"]
 
 
@@ -55,11 +57,14 @@ def _build_ec2_df() -> pd.DataFrame:
     """EC2 dataframe matching scanner + _normalize_ec2 schema."""
     random.seed(42)
     rows = []
+    base_costs = {
+        "t3.small": 15, "t3.medium": 30, "t3.large": 60, "m5.large": 70, "m5.xlarge": 140,
+        "c5.large": 62, "c5.xlarge": 124, "p3.2xlarge": 2190, "g4dn.xlarge": 526,
+    }
     for i in range(NUM_EC2):
         region = random.choice(REGIONS)
-        itype = random.choice(INSTANCE_TYPES)
-        # Realistic cost range by type ($/month approx)
-        base_cost = {"t3.small": 15, "t3.medium": 30, "t3.large": 60, "m5.large": 70, "m5.xlarge": 140, "c5.large": 62, "c5.xlarge": 124}.get(itype, 50)
+        itype = random.choice(GPU_INSTANCE_TYPES) if random.random() < 0.04 else random.choice(INSTANCE_TYPES)
+        base_cost = base_costs.get(itype, 50)
         monthly_cost = round(base_cost * (0.85 + random.random() * 0.3), 2)
         # ~35% idle/low, rest normal (realistic distribution)
         r = random.random()
@@ -80,6 +85,7 @@ def _build_ec2_df() -> pd.DataFrame:
         pot = _potential_savings(cpu_pct, monthly_cost) if state == "running" else 0.0
         idle = _idle_score(cpu_pct)
         sp_covered = random.random() < 0.55  # ~55% on SP
+        env = random.choice(SYNTHETIC_ENVIRONMENTS_EC2)
         rows.append({
             "instance_id": f"i-{hex(10000 + i)[2:].zfill(8)}",
             "name": f"app-{random.choice(['web', 'api', 'worker', 'batch'])}-{i % 20}",
@@ -94,6 +100,7 @@ def _build_ec2_df() -> pd.DataFrame:
             "billing_type": "SP-Covered" if sp_covered and state == "running" else "On-Demand",
             "department": random.choice(DEPARTMENTS),
             "idle_score": round(idle, 1),
+            "environment": env,
         })
     df = pd.DataFrame(rows)
     df["scanned_at"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -226,34 +233,193 @@ SYNTHETIC_SPEND_SERVICES = [
     ("Other", "—", 195.0),         # KMS, SNS, SQS, Glue, etc.
 ]
 
+# AWS Usage Types (Cost Explorer / CUR style) — service → default usage_type
+SERVICE_TO_USAGE_TYPE: dict[str, str] = {
+    "EC2-Other": "EBS:VolumeUsage.gp3",
+    "Lambda": "Lambda-GB-Second",
+    "Elastic Container Service": "Fargate-vCPU-Hour",
+    "EC2 Container Registry (ECR)": "ECR:Storage",
+    "S3": "TimedStorage-ByteHrs",
+    "Data Transfer": "EU-DataTransfer-Out-Bytes",
+    "CloudWatch": "CW:PutMetricData",
+    "VPC": "NatGateway-Hours",
+    "RDS": "USE1-BoxUsage:db.t3.medium",
+    "DynamoDB": "DynamoDB:ReadRequestUnits",
+    "CloudFront": "CF:DataTransfer-Out-Bytes",
+    "Savings Plans (covered)": "SavingsPlan-CoveredUsage",
+    "Savings Plans (on-demand)": "SavingsPlan-OnDemandEquivalent",
+    "Other": "Other",
+}
 
-def get_synthetic_spend() -> tuple[float, pd.DataFrame]:
+# AWS service names (Cost Explorer / Billing Console style)
+SERVICE_TO_AWS_NAME: dict[str, str] = {
+    "EC2-Instances": "Amazon EC2",
+    "EC2-Other": "Amazon EC2 (Other)",
+    "Lambda": "AWS Lambda",
+    "Elastic Container Service": "Amazon Elastic Container Service",
+    "EC2 Container Registry (ECR)": "Amazon EC2 Container Registry (ECR)",
+    "S3": "Amazon Simple Storage Service",
+    "Data Transfer": "AWS Data Transfer",
+    "CloudWatch": "Amazon CloudWatch",
+    "VPC": "Amazon VPC",
+    "RDS": "Amazon Relational Database Service",
+    "DynamoDB": "Amazon DynamoDB",
+    "CloudFront": "Amazon CloudFront",
+    "Savings Plans (covered)": "Savings Plans (covered)",
+    "Savings Plans (on-demand)": "Savings Plans (on-demand)",
+    "Other": "Other",
+}
+
+# Cost allocation tags for synthetic view (matches CUR / Cost Explorer tags)
+SYNTHETIC_ENVIRONMENTS = ["prod", "staging", "dev", "shared"]
+SYNTHETIC_TEAMS = ["Engineering", "Platform", "Data", "Product"]
+SYNTHETIC_COST_CENTERS = ["CC-1001", "CC-1002", "CC-1003"]
+
+# Synthetic linked accounts (multi-account AWS / Organizations)
+SYNTHETIC_LINKED_ACCOUNTS = [
+    ("123456789012", "Prod-Account"),
+    ("234567890123", "Staging-Account"),
+    ("345678901234", "Dev-Account"),
+    ("456789012345", "Shared-Services"),
+]
+ENV_TO_LINKED_ACCOUNT_ID: dict[str, str] = {
+    "prod": "123456789012",
+    "staging": "234567890123",
+    "dev": "345678901234",
+    "shared": "456789012345",
+}
+LINKED_ACCOUNT_DISPLAY: dict[str, str] = {
+    "123456789012": "Prod-Account (123456789012)",
+    "234567890123": "Staging-Account (234567890123)",
+    "345678901234": "Dev-Account (345678901234)",
+    "456789012345": "Shared-Services (456789012345)",
+}
+
+
+def _apply_period_variance(amount: float, period: str) -> float:
+    """Apply synthetic MoM variance: last_month is ~4% lower than this_month (deterministic)."""
+    if period == "last_month":
+        return round(amount * 0.96, 2)  # ~4% lower
+    return amount
+
+
+def _split_row_with_tags(row: dict, category_map: dict[str, str]) -> list[dict]:
+    """Split a spend row across cost allocation tags (Environment, Team, CostCenter) and linked accounts."""
+    seed = sum(ord(c) for c in str(row.get("service", ""))) + int(row.get("amount_usd", 0) * 100)
+    random.seed(seed % (2**32))
+    n = random.randint(2, 4)
+    weights = [random.random() for _ in range(n)]
+    weights = [w / sum(weights) for w in weights]
+    allocations = []
+    allocated = 0.0
+    for i, w in enumerate(weights):
+        env = SYNTHETIC_ENVIRONMENTS[i % len(SYNTHETIC_ENVIRONMENTS)]
+        team = SYNTHETIC_TEAMS[i % len(SYNTHETIC_TEAMS)]
+        cc = SYNTHETIC_COST_CENTERS[i % len(SYNTHETIC_COST_CENTERS)]
+        linked_account_id = ENV_TO_LINKED_ACCOUNT_ID.get(env, "456789012345")
+        linked_account_name = LINKED_ACCOUNT_DISPLAY.get(linked_account_id, linked_account_id)
+        amt = round(row["amount_usd"] * w, 2)
+        if i == len(weights) - 1:
+            amt = round(row["amount_usd"] - allocated, 2)
+        if amt > 0:
+            allocated += amt
+            alloc = {
+                "service": row["service"],
+                "region": row["region"],
+                "amount_usd": amt,
+                "category": category_map.get(row["service"], "Other"),
+                "environment": env,
+                "team": team,
+                "cost_center": cc,
+                "linked_account_id": linked_account_id,
+                "linked_account_name": linked_account_name,
+            }
+            if "usage_type" in row:
+                alloc["usage_type"] = row["usage_type"]
+            allocations.append(alloc)
+    return allocations
+
+
+def get_synthetic_spend(
+    period: str = "this_month",
+    include_tags: bool = True,
+) -> tuple[float, pd.DataFrame]:
     """
     Build full spend for all MVP services when using synthetic data.
     Uses ec2_df and SP_COVERAGE_TREND for compute/commitment; fills rest with synthetic amounts.
-    Returns (total_usd, df) with columns: service, region, amount_usd, category.
+    Returns (total_usd, df) with columns: service, region, amount_usd, category[, environment, team, cost_center].
     """
     rows: list[dict] = []
     total = 0.0
+    category_map = {
+        "EC2-Instances": "Compute",
+        "EC2-Other": "Compute",
+        "Lambda": "Compute",
+        "Elastic Container Service": "Containers",
+        "EC2 Container Registry (ECR)": "Containers",
+        "S3": "Storage",
+        "Data Transfer": "Networking",
+        "CloudWatch": "Monitoring",
+        "VPC": "Networking",
+        "RDS": "Databases",
+        "DynamoDB": "Databases",
+        "CloudFront": "Networking",
+        "Savings Plans (covered)": "Commitment",
+        "Savings Plans (on-demand)": "Commitment",
+        "Other": "Other",
+    }
 
-    # EC2-Instances from ec2_df
+    # EC2-Instances from ec2_df — group by region and instance_type for usage_type
     ec2_df = st.session_state.get("ec2_df", pd.DataFrame())
+    itype_col = next((c for c in ["instance_type", "Instance Type"] if c in ec2_df.columns), None) if ec2_df is not None else None
     if ec2_df is not None and not ec2_df.empty:
         cost_col = next((c for c in ["monthly_cost_usd", "Monthly Cost (USD)", "monthly_cost"] if c in ec2_df.columns), None)
         region_col = next((c for c in ["region", "Region"] if c in ec2_df.columns), None)
         if cost_col:
             amounts = pd.to_numeric(ec2_df[cost_col], errors="coerce").fillna(0)
             ec2_total = float(amounts.sum())
+            ec2_total = _apply_period_variance(ec2_total, period)
             total += ec2_total
-            if region_col:
+            if region_col and itype_col:
+                grp_cols = [region_col, itype_col]
+                by_region_type = (
+                    ec2_df.groupby(grp_cols)[cost_col]
+                    .apply(lambda s: pd.to_numeric(s, errors="coerce").fillna(0).sum())
+                    .reset_index()
+                )
+                by_region_type.columns = ["region", "instance_type", "amount_usd"]
+                for _, r in by_region_type.iterrows():
+                    amt = _apply_period_variance(float(r["amount_usd"]), period)
+                    usage_type = f"BoxUsage:{r['instance_type']}"
+                    rows.append({
+                        "service": "EC2-Instances",
+                        "region": str(r["region"]),
+                        "amount_usd": amt,
+                        "category": "Compute",
+                        "usage_type": usage_type,
+                    })
+            elif region_col:
                 by_region = ec2_df.groupby(region_col)[cost_col].apply(
                     lambda s: pd.to_numeric(s, errors="coerce").fillna(0).sum()
                 ).reset_index()
                 by_region.columns = ["region", "amount_usd"]
                 for _, r in by_region.iterrows():
-                    rows.append({"service": "EC2-Instances", "region": str(r["region"]), "amount_usd": float(r["amount_usd"]), "category": "Compute"})
+                    amt = _apply_period_variance(float(r["amount_usd"]), period)
+                    rows.append({
+                        "service": "EC2-Instances",
+                        "region": str(r["region"]),
+                        "amount_usd": amt,
+                        "category": "Compute",
+                        "usage_type": "BoxUsage",
+                    })
             else:
-                rows.append({"service": "EC2-Instances", "region": "—", "amount_usd": ec2_total, "category": "Compute"})
+                rows.append({
+                    "service": "EC2-Instances",
+                    "region": "—",
+                    "amount_usd": ec2_total,
+                    "category": "Compute",
+                    "usage_type": "BoxUsage",
+                })
 
     # Savings Plans from SP_COVERAGE_TREND
     sp_coverage = st.session_state.get("SP_COVERAGE_TREND", pd.DataFrame())
@@ -269,32 +435,94 @@ def get_synthetic_spend() -> tuple[float, pd.DataFrame]:
                 ondemand = float(pd.to_numeric(sp_coverage[c], errors="coerce").fillna(0).sum())
                 break
         if covered > 0 or ondemand > 0:
+            covered = _apply_period_variance(covered, period)
+            ondemand = _apply_period_variance(ondemand, period)
             total += covered + ondemand
-            rows.append({"service": "Savings Plans (covered)", "region": "—", "amount_usd": covered, "category": "Commitment"})
-            rows.append({"service": "Savings Plans (on-demand)", "region": "—", "amount_usd": ondemand, "category": "Commitment"})
+            rows.append({
+                "service": "Savings Plans (covered)",
+                "region": "—",
+                "amount_usd": covered,
+                "category": "Commitment",
+                "usage_type": SERVICE_TO_USAGE_TYPE["Savings Plans (covered)"],
+            })
+            rows.append({
+                "service": "Savings Plans (on-demand)",
+                "region": "—",
+                "amount_usd": ondemand,
+                "category": "Commitment",
+                "usage_type": SERVICE_TO_USAGE_TYPE["Savings Plans (on-demand)"],
+            })
 
     # Synthetic amounts for other services
-    category_map = {
-        "EC2-Other": "Compute",
-        "Lambda": "Compute",
-        "Elastic Container Service": "Containers",
-        "EC2 Container Registry (ECR)": "Containers",
-        "S3": "Storage",
-        "Data Transfer": "Networking",
-        "CloudWatch": "Monitoring",
-        "VPC": "Networking",
-        "RDS": "Databases",
-        "DynamoDB": "Databases",
-        "CloudFront": "Networking",
-        "Other": "Other",
-    }
     for svc, region, amt in SYNTHETIC_SPEND_SERVICES:
         if amt is not None and svc not in ("EC2-Instances", "Savings Plans (covered)", "Savings Plans (on-demand)"):
+            amt = _apply_period_variance(amt, period)
             total += amt
-            rows.append({"service": svc, "region": region, "amount_usd": amt, "category": category_map.get(svc, "Other")})
+            usage_type = SERVICE_TO_USAGE_TYPE.get(svc, "Other")
+            rows.append({
+                "service": svc,
+                "region": region,
+                "amount_usd": amt,
+                "category": category_map.get(svc, "Other"),
+                "usage_type": usage_type,
+            })
+
+    # Expand rows with cost allocation tags if requested
+    if include_tags and rows:
+        expanded: list[dict] = []
+        for row in rows:
+            expanded.extend(_split_row_with_tags(row, category_map))
+        rows = expanded
 
     df = pd.DataFrame(rows) if rows else pd.DataFrame(columns=["service", "region", "amount_usd", "category"])
     return total, df
+
+
+def get_synthetic_spend_last_month() -> tuple[float, pd.DataFrame]:
+    """Convenience: return last month's spend for MoM comparison."""
+    return get_synthetic_spend(period="last_month", include_tags=True)
+
+
+def get_synthetic_daily_spend(period: str = "this_month") -> pd.DataFrame:
+    """
+    Daily spend for the current month (synthetic). Used for "Daily Unblended Cost" chart.
+    Returns DataFrame with columns: date, service, amount_usd.
+    Realistic variance: weekday vs weekend (weekend ~10% lower), slight growth (~3% over month).
+    """
+    _, spend_df = get_synthetic_spend(period=period, include_tags=False)
+    if spend_df.empty or "amount_usd" not in spend_df.columns:
+        return pd.DataFrame(columns=["date", "service", "amount_usd"])
+
+    by_service = spend_df.groupby("service", as_index=False)["amount_usd"].sum()
+    now = datetime.now(timezone.utc)
+    if period == "last_month":
+        start_date = (now.replace(day=1) - timedelta(days=1)).replace(day=1)
+    else:
+        start_date = now.replace(day=1)
+    days_in_month = 30
+
+    random.seed(60 if period == "this_month" else 61)
+    weights = []
+    for d in range(days_in_month):
+        dt = start_date + timedelta(days=d)
+        is_weekend = dt.weekday() >= 5
+        weekday_factor = 0.92 + random.random() * 0.08 if not is_weekend else 0.82 + random.random() * 0.10
+        growth = 0.97 + (d / max(1, days_in_month - 1)) * 0.06
+        variance = 0.92 + random.random() * 0.16
+        weights.append(weekday_factor * growth * variance)
+    total_weight = sum(weights)
+    weights = [w / total_weight for w in weights]
+
+    rows: list[dict] = []
+    for _, row in by_service.iterrows():
+        service = row["service"]
+        monthly = float(row["amount_usd"])
+        for d in range(days_in_month):
+            dt = start_date + timedelta(days=d)
+            daily_amount = round(monthly * weights[d], 2)
+            rows.append({"date": dt.strftime("%Y-%m-%d"), "service": service, "amount_usd": daily_amount})
+
+    return pd.DataFrame(rows)
 
 
 def _build_storage_df() -> pd.DataFrame:
